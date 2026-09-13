@@ -198,13 +198,15 @@ fn get_supported_impl(impl_key: &str) -> String {
     // TODO: Is it a good idea to use fallback here? Because user do not know the fallback.
     // fallback
     let mut cur_impl = get_option("privacy-mode-impl-key".to_owned());
-    if !get_supported_privacy_mode_impl()
-        .iter()
-        .any(|(k, _)| k == &cur_impl)
-    {
+    if !supported_impls.iter().any(|(k, _)| k == &cur_impl) {
         // fallback
         cur_impl = DEFAULT_PRIVACY_MODE_IMPL.to_owned();
     }
+    log::warn!(
+        "Privacy mode impl \"{}\" is not supported, falling back to \"{}\"",
+        impl_key,
+        cur_impl
+    );
     cur_impl
 }
 
@@ -351,7 +353,7 @@ pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
     }
     #[cfg(target_os = "macos")]
     {
-        // No translation is intended for privacy_mode_impl_macos_tip as it is a 
+        // No translation is intended for privacy_mode_impl_macos_tip as it is a
         // placeholder for macOS specific privacy mode implementation which currently
         // doesn't provide multiple modes like Windows does.
         vec![(macos::PRIVACY_MODE_IMPL, "privacy_mode_impl_macos_tip")]

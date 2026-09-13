@@ -27,6 +27,17 @@ use hbb_common::{
 
 static NEXT_JOB_ID: AtomicI32 = AtomicI32::new(1);
 
+/// Open a file for writing without following a symlink at the final path
+/// component (unix `O_NOFOLLOW`; no-op on other platforms).
+#[inline]
+fn write_open_options(create: bool, truncate: bool) -> OpenOptions {
+    let mut opts = OpenOptions::new();
+    opts.write(true).create(create).truncate(truncate);
+    #[cfg(unix)]
+    opts.custom_flags(libc::O_NOFOLLOW);
+    opts
+}
+
 pub fn get_next_job_id() -> i32 {
     NEXT_JOB_ID.fetch_add(1, Ordering::SeqCst)
 }
@@ -799,7 +810,9 @@ impl TransferJob {
                             std::fs::remove_file(dp)?;
                         }
                     }
-                    self.data_stream = Some(DataStream::FileStream(File::create(&path).await?));
+                    self.data_stream = Some(DataStream::FileStream(
+                        write_open_options(true, true).open(&path).await?,
+                    ));
                     if let Some(dp) = digest_path.as_ref() {
                         std::fs::write(dp, json!(self.digest).to_string()).ok();
                     }
@@ -1122,12 +1135,7 @@ impl TransferJob {
                 // If both download and digest files exist, seek (writer) to the offset
                 // NOTE: same as write path: best-effort symlink validation happened earlier,
                 // but this reopen remains TOCTOU-prone by design for now.
-                match OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .open(&download_path)
-                    .await
-                {
+                match write_open_options(true, false).open(&download_path).await {
                     Ok(f) => f,
                     Err(e) => {
                         log::warn!("Failed to open file {}: {}", download_path, e);
@@ -1388,15 +1396,18 @@ pub async fn handle_read_jobs(
 }
 
 pub fn remove_all_empty_dir(path: &Path) -> ResultType<()> {
+    // Do not follow a symlinked `path` itself: only real directories are handled.
+    if !std::fs::symlink_metadata(path)?.file_type().is_dir() {
+        return Ok(());
+    }
     let fd = read_dir(path, true)?;
     for entry in fd.entries.iter() {
         match entry.entry_type.enum_value() {
             Ok(FileType::Dir) => {
                 remove_all_empty_dir(&path.join(&entry.name)).ok();
             }
-            Ok(FileType::DirLink) | Ok(FileType::FileLink) => {
-                std::fs::remove_file(path.join(&entry.name)).ok();
-            }
+            // Symlinks (to files or directories) and regular files are left
+            // untouched: only real, empty directories are removed.
             _ => {}
         }
     }

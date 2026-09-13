@@ -183,7 +183,9 @@ fn setup(
     let mut metadata_paths = reader.package_paths.clone();
     metadata_paths.extend(remove_dropped_package_files(&dir, &reader.package_paths));
     for file in reader.files.iter() {
-        file.write_to_file(&dir);
+        if let Err(e) = file.write_to_file(&dir) {
+            eprintln!("{}", e);
+        }
     }
     write_meta(&dir, ts, &metadata_paths);
     #[cfg(windows)]

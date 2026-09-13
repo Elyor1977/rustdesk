@@ -6,6 +6,7 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   # for multiarch gcc compatibility
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  PROJECT_NAME: "rustdesk"
 
 on:
   workflow_dispatch:
@@ -25,18 +26,40 @@ on:
       - "flatpak/**"
 
 jobs:
-  # ensure_cargo_fmt:
-  #   name: Ensure 'cargo fmt' has been run
-  #   runs-on: ubuntu-20.04
-  #   steps:
-  #   - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1
-  #     with:
-  #       toolchain: stable
-  #       default: true
-  #       profile: minimal
-  #       components: rustfmt
-  #   - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
-  #   - run: cargo fmt -- --check
+  ensure_cargo_fmt:
+    name: Ensure 'cargo fmt' has been run
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        submodules: recursive
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+      with:
+        toolchain: stable
+        components: rustfmt
+    - name: Run cargo fmt
+      run: cargo fmt --all -- --check
+
+  cargo_audit:
+    name: Check RustSec advisories (cargo audit)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      with:
+        submodules: recursive
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+      with:
+        toolchain: stable
+    - name: Run cargo audit
+      continue-on-error: true
+      run: |
+        cargo install cargo-audit --locked
+        cargo audit
 
   # min_version:
   #   name: Minimum supported rust version
@@ -180,6 +203,13 @@ jobs:
         use-cross: ${{ matrix.job.use-cross }}
         command: build
         args: --locked --target=${{ matrix.job.target }}
+
+    - name: Run clippy
+      continue-on-error: true
+      shell: bash
+      run: |
+        rustup component add clippy
+        cargo clippy --locked --target=${{ matrix.job.target }} --workspace --all-targets
 
     - name: clean
       shell: bash

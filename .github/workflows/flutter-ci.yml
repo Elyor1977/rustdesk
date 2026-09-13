@@ -22,3 +22,31 @@ jobs:
     uses: ./.github/workflows/flutter-build.yml
     with:
       upload-artifact: false
+
+  flutter-analyze:
+    name: flutter analyze / flutter test
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: "3.24.5" # keep in sync with FLUTTER_VERSION in flutter-build.yml
+
+      - name: flutter pub get
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: flutter analyze
+        continue-on-error: true
+        working-directory: flutter
+        run: flutter analyze
+
+      - name: flutter test
+        continue-on-error: true
+        working-directory: flutter
+        run: flutter test
