@@ -40,7 +40,7 @@ on:
       - "src/**"
 
 env:
-  SCITER_RUST_VERSION: "1.75"
+  RUST_VERSION: "1.88"
   LLVM_VERSION: "15.0.6"
   FLUTTER_VERSION: "3.24.5"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
@@ -125,7 +125,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          toolchain: ${{ env.RUST_VERSION }}
           targets: x86_64-pc-windows-msvc
           components: "rustfmt"
 
