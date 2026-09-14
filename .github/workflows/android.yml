@@ -205,11 +205,12 @@ jobs:
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           if [ '${{ inputs.release }}' = 'true' ]; then
-            test -n "$ANDROID_SIGNING_KEY"
-            test -n "$ANDROID_ALIAS"
-            test -n "$ANDROID_KEY_STORE_PASSWORD"
-            test -n "$ANDROID_KEY_PASSWORD"
+            test -n "$ANDROID_SIGNING_KEY" || { echo "ANDROID_SIGNING_KEY is required"; exit 1; }
+            test -n "$ANDROID_ALIAS" || { echo "ANDROID_ALIAS is required"; exit 1; }
+            test -n "$ANDROID_KEY_STORE_PASSWORD" || { echo "ANDROID_KEY_STORE_PASSWORD is required"; exit 1; }
+            test -n "$ANDROID_KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD is required"; exit 1; }
             printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > ./flutter/android/app/release.jks
+            keytool -list -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" >/dev/null
             printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release.jks\n' "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_ALIAS" > ./flutter/android/key.properties
           fi
           cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ matrix.job.sysroot }}/libc++_shared.so ./flutter/android/app/src/main/jniLibs/${{ matrix.job.abi }}/
@@ -233,3 +234,8 @@ jobs:
         with:
           name: rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}-apk
           path: apk
+
+      - name: Remove Android signing material
+        if: always() && env.skip != '1' && inputs.release
+        shell: bash
+        run: rm -f ./flutter/android/app/release.jks ./flutter/android/key.properties

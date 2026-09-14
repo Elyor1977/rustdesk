@@ -7,14 +7,14 @@ on:
         type: boolean
         default: false
     secrets:
-      SIGN_BASE_URL:
+      WINDOWS_CERTIFICATE_BASE64:
         required: false
-      SIGN_SECRET_KEY:
+      WINDOWS_CERTIFICATE_PASSWORD:
         required: false
   workflow_dispatch:
     inputs:
       release:
-        description: "Sign and upload release artifacts"
+        description: "Sign with the configured Windows certificate"
         type: boolean
         default: false
   pull_request:
@@ -199,20 +199,17 @@ jobs:
       - name: Validate signing configuration
         if: inputs.release
         env:
-          SIGN_BASE_URL: ${{ secrets.SIGN_BASE_URL }}
-          SIGN_SECRET_KEY: ${{ secrets.SIGN_SECRET_KEY }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:SIGN_BASE_URL) -or [string]::IsNullOrWhiteSpace($env:SIGN_SECRET_KEY)) { throw "Release signing secrets are required" }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw "Windows signing secrets are required" }
 
       - name: Sign application files
         if: inputs.release
-        shell: bash
         env:
-          SIGN_BASE_URL: ${{ secrets.SIGN_BASE_URL }}
-          SIGN_SECRET_KEY: ${{ secrets.SIGN_SECRET_KEY }}
-        run: |
-          pip3 install requests==2.32.5 argparse==1.4.0
-          BASE_URL="$SIGN_BASE_URL" SECRET_KEY="$SIGN_SECRET_KEY" python3 res/job.py sign_files ./rustdesk/
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: .\.github\scripts\sign-windows.ps1 -Path .\rustdesk
 
       - name: Upload unpacked folder
         if: inputs.release
@@ -247,11 +244,10 @@ jobs:
 
       - name: Sign installers
         if: inputs.release
-        shell: bash
         env:
-          SIGN_BASE_URL: ${{ secrets.SIGN_BASE_URL }}
-          SIGN_SECRET_KEY: ${{ secrets.SIGN_SECRET_KEY }}
-        run: BASE_URL="$SIGN_BASE_URL" SECRET_KEY="$SIGN_SECRET_KEY" python3 res/job.py sign_files ./Output/
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: .\.github\scripts\sign-windows.ps1 -Path .\Output
 
       - name: Verify installers and write checksums
         run: |
