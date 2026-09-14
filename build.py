@@ -10,6 +10,7 @@ import urllib.request
 import shutil
 import hashlib
 import re
+import shlex
 import subprocess
 import argparse
 import sys
@@ -48,11 +49,17 @@ def get_deb_extra_depends() -> str:
         return ", libatomic1"
     return ""
 
-def system2(cmd):
-    exit_code = os.system(cmd)
-    if exit_code != 0:
-        sys.stderr.write(f"Error occurred when executing: `{cmd}`. Exiting.\n")
+def run(cmd):
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        sys.stderr.write(
+            f"Error occurred when executing: `{cmd}` (exit code {e.returncode}). Exiting.\n")
         sys.exit(-1)
+
+
+def system2(cmd):
+    run(cmd)
 
 
 def get_version():
@@ -174,42 +181,6 @@ def make_parser():
             help='Enable feature screencapturekit'
         )
     return parser
-
-
-# Generate build script for docker
-#
-# it assumes all build dependencies are installed in environments
-# Note: do not use it in bare metal, or may break build environments
-def generate_build_script_for_docker():
-    with open("/tmp/build.sh", "w") as f:
-        f.write('''
-            #!/bin/bash
-            # environment
-            export CPATH="$(clang -v 2>&1 | grep "Selected GCC installation: " | cut -d' ' -f4-)/include"
-            # flutter
-            pushd /opt
-            wget https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.0.5-stable.tar.xz
-            tar -xvf flutter_linux_3.0.5-stable.tar.xz
-            export PATH=`pwd`/flutter/bin:$PATH
-            popd
-            # flutter_rust_bridge
-            dart pub global activate ffigen --version 5.0.1
-            pushd /tmp && git clone https://github.com/SoLongAndThanksForAllThePizza/flutter_rust_bridge --depth=1 && popd
-            pushd /tmp/flutter_rust_bridge/frb_codegen && cargo install --path . --locked && popd
-            pushd flutter && flutter pub get && popd
-            ~/.cargo/bin/flutter_rust_bridge_codegen --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart
-            # install vcpkg
-            pushd /opt
-            export VCPKG_ROOT=`pwd`/vcpkg
-            git clone https://github.com/microsoft/vcpkg
-            vcpkg/bootstrap-vcpkg.sh
-            popd
-            $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"
-            # build rustdesk
-            ./build.py --flutter --hwcodec
-        ''')
-    system2("chmod +x /tmp/build.sh")
-    system2("bash /tmp/build.sh")
 
 
 # Downloading third party resources is deprecated.
@@ -503,10 +474,10 @@ def build_libdrmtap_so():
         if os.path.isdir(src):
             shutil.rmtree(src)
         os.makedirs(src, exist_ok=True)
-        system2(f'git -C "{src}" init -q')
-        system2(f'git -C "{src}" remote add origin {LIBDRMTAP_REPO}')
-        system2(f'git -C "{src}" fetch --depth 1 origin {LIBDRMTAP_SHA}')
-        system2(f'git -C "{src}" checkout -q FETCH_HEAD')
+        system2(f'git -C {shlex.quote(src)} init -q')
+        system2(f'git -C {shlex.quote(src)} remote add origin {LIBDRMTAP_REPO}')
+        system2(f'git -C {shlex.quote(src)} fetch --depth 1 origin {LIBDRMTAP_SHA}')
+        system2(f'git -C {shlex.quote(src)} checkout -q FETCH_HEAD')
     # Verify the pin whenever the source is a GIT checkout. A fetch by sha cannot resolve to anything
     # else, so this now guards the OTHER case: a reused checkout left by an earlier build at a
     # different pin, which is what a bump leaves behind. Reject and remove it so the next run re-fetches
@@ -522,12 +493,12 @@ def build_libdrmtap_so():
                 f'(stale checkout from a different pin; removed, re-run to re-fetch)')
     build_dir = os.path.join(src, 'build-pkg')
     if not os.path.exists(os.path.join(build_dir, 'build.ninja')):
-        system2(f'meson setup "{build_dir}" "{src}" --buildtype=release')
+        system2(f'meson setup {shlex.quote(build_dir)} {shlex.quote(src)} --buildtype=release')
     # Build only the shared library, not the bundled helper binary or the static archive. Since
     # libdrmtap 0.4.11 the project is `both_libraries` (a version-scripted .so + a static .a), so the
     # bare `drmtap` target is ambiguous ("drmtap:shared_library" vs "drmtap:static_library"); ask for
     # the shared one explicitly (rustdesk dlopens the .so and never needs the archive).
-    system2(f'meson compile -C "{build_dir}" drmtap:shared_library')
+    system2(f'meson compile -C {shlex.quote(build_dir)} drmtap:shared_library')
     sos = glob.glob(os.path.join(build_dir, 'libdrmtap.so.0.*'))
     # keep the real object (libdrmtap.so.0.4.x), not the .so/.so.0 symlinks or meson's .p dir, and
     # require exactly one so a stale object from an earlier build is never silently picked.
@@ -630,8 +601,8 @@ def stage_libdrmtap_into_deb(so_path):
     system2('mkdir -p tmpdeb/usr/lib/rustdesk')
     # Quoted: so_path comes from the repo root or from DRMTAP_PREBUILT_DIR, either of which can
     # contain a space, and an unquoted interpolation would split the argument and fail obscurely.
-    system2(f'cp "{so_path}" tmpdeb/usr/lib/rustdesk/')
-    system2(f'ln -sf "{so_basename}" tmpdeb/usr/lib/rustdesk/libdrmtap.so.0')
+    system2(f'cp {shlex.quote(so_path)} tmpdeb/usr/lib/rustdesk/')
+    system2(f'ln -sf {shlex.quote(so_basename)} tmpdeb/usr/lib/rustdesk/libdrmtap.so.0')
 
 
 def _max_glibc_minor(path):
@@ -866,7 +837,7 @@ def build_deb_from_folder(version, binary_folder, want_drm=False):
             # without a word.
             _assert_so_has_egl(so)
             stage_libdrmtap_into_deb(so)
-            system2(f'rm -f "{so}"')
+            system2(f'rm -f {shlex.quote(so)}')
             system2('rm -f tmpdeb/usr/share/rustdesk/libdrmtap.so tmpdeb/usr/share/rustdesk/libdrmtap.so.0')
         else:
             # Build it here, exactly as the flutter deb path does (build_libdrmtap_so asserts the
@@ -921,7 +892,7 @@ def build_flutter_arch_manjaro(version, features):
     ffi_bindgen_function_refactor()
     os.chdir('flutter')
     system2('flutter build linux --release')
-    system2(f'strip {flutter_build_dir}/lib/librustdesk.so')
+    system2(f'strip {shlex.quote(flutter_build_dir)}/lib/librustdesk.so')
     os.chdir('../res')
     system2('HBB=`pwd`/.. FLUTTER=1 makepkg -f')
 
@@ -1124,7 +1095,7 @@ def main():
                     'cp res/rustdesk.desktop tmpdeb/usr/share/applications/rustdesk.desktop')
                 system2(
                     'cp res/rustdesk-link.desktop tmpdeb/usr/share/applications/rustdesk-link.desktop')
-                os.system('cp -a DEBIAN/* tmpdeb/DEBIAN/')
+                run('cp -a DEBIAN/* tmpdeb/DEBIAN/')
                 system2('strip tmpdeb/usr/bin/rustdesk')
                 system2('mkdir -p tmpdeb/usr/share/rustdesk')
                 system2('mv tmpdeb/usr/bin/rustdesk tmpdeb/usr/share/rustdesk/')
