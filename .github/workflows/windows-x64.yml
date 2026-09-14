@@ -1,14 +1,53 @@
 name: Windows x64 only
 
 on:
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
+    secrets:
+      SIGN_BASE_URL:
+        required: false
+      SIGN_SECRET_KEY:
+        required: false
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Sign and upload release artifacts"
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - ".github/workflows/windows-x64.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "res/msi/**"
+      - "src/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/windows-x64.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "res/msi/**"
+      - "src/**"
 
 env:
   SCITER_RUST_VERSION: "1.75"
   LLVM_VERSION: "15.0.6"
   FLUTTER_VERSION: "3.24.5"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-  VERSION: "1.5.0"
+  FLUTTER_ENGINE_SHA256: "ec8cabf36ee4ff24c8d98de25b00e70781eb03876265aee84d0fe554a110036e"
+  USBMMIDD_SHA256: "629b51e9944762bae73948171c65d09a79595cf4c771a82ebc003fbba5b24f51"
+  PRINTER_DRIVER_SHA256: "c4cf4d3b48c4d9079b243edc43bb1db03b076282bc259c9f49883e9db20fa8b5"
+  PRINTER_ADAPTER_SHA256: "e90e5d52c8807b4c6293c78a52479338715e0bf396b1b34802777b8c452e6781"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
@@ -41,6 +80,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Read project version
+        id: version
+        run: |
+          $version = python3 .\build.py --print-version
+          if (-not $version) { throw "Cargo.toml package version is missing" }
+          "value=$version" >> $env:GITHUB_OUTPUT
+
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -65,6 +111,7 @@ jobs:
           flutter doctor -v
           flutter precache --windows
           Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          if ((Get-FileHash windows-x64-release.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.FLUTTER_ENGINE_SHA256 }}') { throw "Flutter engine checksum mismatch" }
           Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
           mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
 
@@ -109,29 +156,28 @@ jobs:
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          if ((Get-FileHash usbmmidd_v2.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.USBMMIDD_SHA256 }}') { throw "usbmmidd checksum mismatch" }
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
           Remove-Item -Path usbmmidd_v2\Win32 -Recurse
           Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
           mv -Force .\usbmmidd_v2 ./rustdesk
 
-          try {
-            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile rustdesk_printer_driver_v4-1.4.zip
-            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile printer_driver_adapter.zip
-            Expand-Archive rustdesk_printer_driver_v4-1.4.zip -DestinationPath .
-            mkdir ./rustdesk/drivers
-            mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
-            Expand-Archive printer_driver_adapter.zip -DestinationPath .
-            mv -Force .\printer_driver_adapter.dll ./rustdesk
-          } catch {
-            Write-Host "Ignore the printer driver error."
-          }
+          Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile rustdesk_printer_driver_v4-1.4.zip
+          Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile printer_driver_adapter.zip
+          if ((Get-FileHash rustdesk_printer_driver_v4-1.4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.PRINTER_DRIVER_SHA256 }}') { throw "Printer driver checksum mismatch" }
+          if ((Get-FileHash printer_driver_adapter.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.PRINTER_ADAPTER_SHA256 }}') { throw "Printer adapter checksum mismatch" }
+          Expand-Archive rustdesk_printer_driver_v4-1.4.zip -DestinationPath .
+          mkdir ./rustdesk/drivers
+          mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
+          Expand-Archive printer_driver_adapter.zip -DestinationPath .
+          mv -Force .\printer_driver_adapter.dll ./rustdesk
 
       - name: find Runner.res
-        continue-on-error: true
         shell: bash
         run: |
           runner_res=$(find . -name "Runner.res")
-          if [ -n "$runner_res" ]; then cp $runner_res ./libs/portable/Runner.res; fi
+          test -n "$runner_res"
+          cp "$runner_res" ./libs/portable/Runner.res
 
       - name: Download RustDeskTempTopMostWindow artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -139,7 +185,26 @@ jobs:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
 
+      - name: Validate signing configuration
+        if: inputs.release
+        env:
+          SIGN_BASE_URL: ${{ secrets.SIGN_BASE_URL }}
+          SIGN_SECRET_KEY: ${{ secrets.SIGN_SECRET_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGN_BASE_URL) -or [string]::IsNullOrWhiteSpace($env:SIGN_SECRET_KEY)) { throw "Release signing secrets are required" }
+
+      - name: Sign application files
+        if: inputs.release
+        shell: bash
+        env:
+          SIGN_BASE_URL: ${{ secrets.SIGN_BASE_URL }}
+          SIGN_SECRET_KEY: ${{ secrets.SIGN_SECRET_KEY }}
+        run: |
+          pip3 install requests==2.32.5 argparse==1.4.0
+          BASE_URL="$SIGN_BASE_URL" SECRET_KEY="$SIGN_SECRET_KEY" python3 res/job.py sign_files ./rustdesk/
+
       - name: Upload unpacked folder
+        if: inputs.release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rustdesk-windows-x86_64-folder
@@ -154,22 +219,43 @@ jobs:
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
           popd
           mkdir -p ./Output
-          mv ./target/release/rustdesk-portable-packer.exe ./Output/rustdesk-${{ env.VERSION }}-x86_64.exe
+          mv ./target/release/rustdesk-portable-packer.exe ./Output/rustdesk-${{ steps.version.outputs.value }}-x86_64.exe
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
 
       - name: Build msi
-        continue-on-error: true
         run: |
           pushd ./res/msi
           python preprocess.py --arp -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
-          mv $msi.FullName ../../Output/rustdesk-${{ env.VERSION }}-x86_64.msi
+          if (-not $msi) { throw "MSI output is missing" }
+          mv $msi.FullName ../../Output/rustdesk-${{ steps.version.outputs.value }}-x86_64.msi
+
+      - name: Sign installers
+        if: inputs.release
+        shell: bash
+        env:
+          SIGN_BASE_URL: ${{ secrets.SIGN_BASE_URL }}
+          SIGN_SECRET_KEY: ${{ secrets.SIGN_SECRET_KEY }}
+        run: BASE_URL="$SIGN_BASE_URL" SECRET_KEY="$SIGN_SECRET_KEY" python3 res/job.py sign_files ./Output/
+
+      - name: Verify installers and write checksums
+        run: |
+          $artifacts = @(Get-ChildItem ./Output -File | Where-Object Extension -in '.exe', '.msi')
+          if ($artifacts.Count -ne 2) { throw "Expected EXE and MSI outputs" }
+          if ('${{ inputs.release }}' -eq 'true') {
+            foreach ($artifact in $artifacts) {
+              if ((Get-AuthenticodeSignature $artifact.FullName).Status -ne 'Valid') { throw "Invalid Authenticode signature: $($artifact.Name)" }
+            }
+          }
+          $lines = $artifacts | Sort-Object Name | ForEach-Object { "{0} *{1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+          Set-Content -Path ./Output/SHA256SUMS.txt -Value $lines
 
       - name: Upload installers
+        if: inputs.release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rustdesk-windows-x86_64-installers

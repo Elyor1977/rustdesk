@@ -18,7 +18,6 @@ on:
     branches:
       - master
     paths-ignore:
-      - ".github/**"
       - "docs/**"
       - "README.md"
       - "res/**"
@@ -45,7 +44,6 @@ jobs:
   cargo_audit:
     name: Check RustSec advisories (cargo audit)
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
     - name: Checkout source code
       uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -56,9 +54,8 @@ jobs:
       with:
         toolchain: stable
     - name: Run cargo audit
-      continue-on-error: true
       run: |
-        cargo install cargo-audit --locked
+        cargo install cargo-audit --version 0.22.0 --locked
         cargo audit
 
   # min_version:
@@ -205,7 +202,6 @@ jobs:
         args: --locked --target=${{ matrix.job.target }}
 
     - name: Run clippy
-      continue-on-error: true
       shell: bash
       run: |
         rustup component add clippy

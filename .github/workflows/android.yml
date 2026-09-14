@@ -1,6 +1,23 @@
 name: Android only
 
 on:
+  workflow_call:
+    inputs:
+      arch:
+        type: string
+        default: all
+      release:
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_SIGNING_KEY:
+        required: false
+      ANDROID_ALIAS:
+        required: false
+      ANDROID_KEY_STORE_PASSWORD:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
   workflow_dispatch:
     inputs:
       arch:
@@ -8,6 +25,29 @@ on:
         type: choice
         default: aarch64
         options: [aarch64, armv7, x86_64, all]
+      release:
+        description: "Sign and upload release artifacts"
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - ".github/workflows/android.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "src/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/android.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "src/**"
 
 env:
   RUST_VERSION: "1.75"
@@ -15,7 +55,7 @@ env:
   ANDROID_FLUTTER_VERSION: "3.24.5"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   NDK_VERSION: "r28c"
-  VERSION: "1.5.0"
+  SELECTED_ARCH: ${{ inputs.arch || 'aarch64' }}
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
@@ -35,7 +75,7 @@ jobs:
           - { arch: x86_64,  target: x86_64-linux-android,    abi: x86_64,      platform: android-x64,   ndk: ndk_x64.sh,   sysroot: x86_64-linux-android }
     steps:
       - name: Skip unselected arch
-        if: ${{ inputs.arch != 'all' && inputs.arch != matrix.job.arch }}
+        if: ${{ env.SELECTED_ARCH != 'all' && env.SELECTED_ARCH != matrix.job.arch }}
         run: echo "skip=1" >> $GITHUB_ENV
 
       - name: Free Disk Space (Ubuntu)
@@ -73,6 +113,14 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
+
+      - name: Read project version
+        if: env.skip != '1'
+        id: version
+        run: |
+          version=$(python3 ./build.py --print-version)
+          test -n "$version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
 
       - name: Install flutter
         if: env.skip != '1'
@@ -149,21 +197,39 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          ANDROID_ALIAS: ${{ secrets.ANDROID_ALIAS }}
+          ANDROID_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
-          # no release keystore in this repo: sign with the debug key so the apk is installable
-          sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
+          if [ '${{ inputs.release }}' = 'true' ]; then
+            test -n "$ANDROID_SIGNING_KEY"
+            test -n "$ANDROID_ALIAS"
+            test -n "$ANDROID_KEY_STORE_PASSWORD"
+            test -n "$ANDROID_KEY_PASSWORD"
+            printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > ./flutter/android/app/release.jks
+            printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release.jks\n' "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_ALIAS" > ./flutter/android/key.properties
+          fi
           cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ matrix.job.sysroot }}/libc++_shared.so ./flutter/android/app/src/main/jniLibs/${{ matrix.job.abi }}/
           pushd flutter
-          flutter build apk --release --target-platform ${{ matrix.job.platform }} --split-per-abi
+          flutter build apk --release --build-name "${{ steps.version.outputs.value }}" --target-platform ${{ matrix.job.platform }} --split-per-abi
           popd
           mkdir -p apk
-          mv flutter/build/app/outputs/flutter-apk/app-${{ matrix.job.abi }}-release.apk apk/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
+          mv flutter/build/app/outputs/flutter-apk/app-${{ matrix.job.abi }}-release.apk apk/rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}.apk
+
+      - name: Verify APK signature
+        if: env.skip != '1' && inputs.release
+        shell: bash
+        run: |
+          apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -x "$apksigner"
+          "$apksigner" verify --verbose apk/*.apk
 
       - name: Upload apk
-        if: env.skip != '1'
+        if: env.skip != '1' && inputs.release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-apk
+          name: rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}-apk
           path: apk

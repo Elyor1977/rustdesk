@@ -154,7 +154,7 @@ virtual_display = { path = "libs/virtual_display" }
 remote_printer = { path = "libs/remote_printer" }
 impersonate_system = { git = "https://github.com/rustdesk-org/impersonate-system", rev = "2f429010a5a10b1fe5eceb553c6672fd53d20167" }
 shared_memory = "0.12"
-tauri-winrt-notification = "0.1"
+tauri-winrt-notification = { git = "https://github.com/tauri-apps/winrt-notification", rev = "09a4135a871c6ead29832dca5698948fb30bf94b" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
@@ -163,7 +163,6 @@ dispatch = "0.2"
 core-foundation = "0.9"
 core-graphics = "0.22"
 include_dir = "0.7"
-fruitbasket = "0.10"
 objc_id = "0.1"
 # If we use piet "0.7" here, we must also update core-graphics to "0.24".
 piet = "0.6"
@@ -174,9 +173,6 @@ foreign-types = "0.3"
 tray-icon = { git = "https://github.com/tauri-apps/tray-icon", rev = "0a5835b0e6828e37a1f781de9c2d671ae7a939e6", version = "0.21.3" }
 tao = { git = "https://github.com/rustdesk-org/tao", rev = "288c219cb0527e509590c2b2d8e7072aa9feb2d3" }
 image = "0.24"
-
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-keepawake = { git = "https://github.com/rustdesk-org/keepawake-rs", rev = "64d568586dd16551d02120e19668d2b0fec8e3c9" }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 wallpaper = { git = "https://github.com/rustdesk-org/wallpaper.rs", rev = "ce4a0cd3f58327c7cc44d15a63706fb0c022bacf" }
@@ -256,7 +252,6 @@ winapi = { version = "0.3", features = [ "winnt", "pdh", "synchapi" ] }
 [build-dependencies]
 cc = "1.0"
 hbb_common = { path = "libs/hbb_common" }
-os-version = "0.2"
 
 [dev-dependencies]
 hound = "3.5"

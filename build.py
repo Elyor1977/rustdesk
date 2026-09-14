@@ -160,6 +160,11 @@ def make_parser():
              'for the list rather than repeat it, so the two cannot drift.'
     )
     parser.add_argument(
+        '--print-version',
+        action='store_true',
+        help='Print the package version from Cargo.toml and exit.'
+    )
+    parser.add_argument(
         '--skip-cargo',
         action='store_true',
         help='Skip cargo build process, only flutter version + Linux supported currently'
@@ -932,6 +937,10 @@ def main():
     global skip_cargo
     parser = make_parser()
     args = parser.parse_args()
+
+    if args.print_version:
+        print(get_version())
+        return
 
     # Before anything with a side effect: this is a query, and a caller uses it to build the very
     # binary it will then package. `get_features` stays the single definition of what a flag

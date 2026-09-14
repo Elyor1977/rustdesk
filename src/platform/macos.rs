@@ -2070,25 +2070,76 @@ pub fn elevate(args: Vec<&str>, prompt: &str) -> ResultType<bool> {
     }
 }
 
-pub struct WakeLock(Option<keepawake::AwakeHandle>);
+struct Caffeinate(std::process::Child);
+
+impl Caffeinate {
+    fn new(display: bool, idle: bool, sleep: bool) -> ResultType<Option<Self>> {
+        let mut args = Vec::new();
+        if display {
+            args.push("-d");
+        }
+        if idle {
+            args.push("-i");
+        }
+        if sleep {
+            args.push("-s");
+        }
+        if args.is_empty() {
+            return Ok(None);
+        }
+        let child = std::process::Command::new("/usr/bin/caffeinate")
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .context("failed to start caffeinate")?;
+        Ok(Some(Self(child)))
+    }
+}
+
+impl Drop for Caffeinate {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.kill() {
+            log::debug!("wakelock: failed to stop caffeinate ({err})");
+        }
+        if let Err(err) = self.0.wait() {
+            log::debug!("wakelock: failed to reap caffeinate ({err})");
+        }
+    }
+}
+
+pub struct WakeLock {
+    handle: Option<Caffeinate>,
+    display: bool,
+    idle: bool,
+    sleep: bool,
+}
 
 impl WakeLock {
     pub fn new(display: bool, idle: bool, sleep: bool) -> Self {
-        WakeLock(
-            keepawake::Builder::new()
-                .display(display)
-                .idle(idle)
-                .sleep(sleep)
-                .create()
-                .ok(),
-        )
+        let handle = match Caffeinate::new(display, idle, sleep) {
+            Ok(handle) => handle,
+            Err(err) => {
+                log::info!("wakelock: {err}");
+                None
+            }
+        };
+        Self {
+            handle,
+            display,
+            idle,
+            sleep,
+        }
     }
 
     pub fn set_display(&mut self, display: bool) -> ResultType<()> {
-        self.0
-            .as_mut()
-            .map(|h| h.set_display(display))
-            .ok_or(anyhow!("no AwakeHandle"))?
+        if self.display != display {
+            self.handle = None;
+            self.display = display;
+            self.handle = Caffeinate::new(self.display, self.idle, self.sleep)?;
+        }
+        Ok(())
     }
 }
 

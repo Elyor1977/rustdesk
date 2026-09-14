@@ -1696,6 +1696,59 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn write_error_is_sticky_and_reported_by_job() {
+        let mut job = new_validation_job(7);
+        let first = job
+            .write(FileTransferBlock {
+                id: 8,
+                file_num: 0,
+                data: vec![1].into(),
+                ..Default::default()
+            })
+            .await
+            .expect_err("wrong job id must fail");
+        assert_err_contains(first, "Wrong id");
+
+        let second = job
+            .write(FileTransferBlock {
+                id: 7,
+                file_num: 0,
+                data: vec![2].into(),
+                ..Default::default()
+            })
+            .await
+            .expect_err("failed job must refuse later blocks");
+        assert_err_contains(second, "Job already failed: Wrong id");
+        assert_eq!(job.job_error().as_deref(), Some("Wrong id"));
+    }
+
+    #[tokio::test]
+    async fn failed_resume_blocks_io_until_new_confirmation() {
+        let tmp_root = TestTempDir::new("rustdesk_resume_error");
+        let mut job =
+            new_write_job(9, tmp_root.path.clone(), "missing.bin").expect("create write job");
+        let failed_resume = FileTransferSendConfirmRequest {
+            id: 9,
+            file_num: 0,
+            union: Some(file_transfer_send_confirm_request::Union::OffsetBlk(4)),
+            ..Default::default()
+        };
+
+        assert!(!job.confirm(&failed_resume).await);
+        let err = job.read().await.expect_err("failed resume must block IO");
+        assert_err_contains(err, "Failed to resume file");
+
+        let restart = FileTransferSendConfirmRequest {
+            id: 9,
+            file_num: 0,
+            union: Some(file_transfer_send_confirm_request::Union::OffsetBlk(0)),
+            ..Default::default()
+        };
+        assert!(job.confirm(&restart).await);
+        assert!(job.resume_error.is_none());
+    }
+
     #[test]
     fn path_traversal_e2e_write_rejects_relative_escape() {
         let tmp_root = TestTempDir::new("rustdesk_e2e_relative");

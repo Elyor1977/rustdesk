@@ -2471,7 +2471,6 @@ mod desktop {
 }
 
 /// A session-bus idle-inhibit interface, tried in order; the first that answers wins.
-/// `org.freedesktop.ScreenSaver` is absent on purpose: that is the one `keepawake` already tried.
 struct SessionInhibitTarget {
     dest: &'static str,
     path: &'static str,
@@ -2486,6 +2485,13 @@ struct SessionInhibitTarget {
 const GNOME_INHIBIT_IDLE: u32 = 8;
 
 const SESSION_INHIBIT_TARGETS: &[SessionInhibitTarget] = &[
+    SessionInhibitTarget {
+        dest: "org.freedesktop.ScreenSaver",
+        path: "/org/freedesktop/ScreenSaver",
+        iface: "org.freedesktop.ScreenSaver",
+        gnome_shape: false,
+        uninhibit: "UnInhibit",
+    },
     // Measured on a GDM greeter: output held 129.9 s with the inhibit, 30.3 s without.
     SessionInhibitTarget {
         dest: "org.gnome.SessionManager",
@@ -2505,8 +2511,6 @@ const SESSION_INHIBIT_TARGETS: &[SessionInhibitTarget] = &[
     },
 ];
 
-/// Idle inhibit for the case `keepawake` cannot serve: it inhibits `org.freedesktop.ScreenSaver`,
-/// which a GDM greeter bus neither provides nor can activate, so its `create()` fails outright.
 /// The connection is kept because the inhibit is bound to it: dropping it releases the inhibit.
 struct SessionIdleInhibit {
     conn: dbus::blocking::Connection,
@@ -2586,51 +2590,63 @@ impl Drop for SessionIdleInhibit {
     }
 }
 
-pub struct WakeLock(Option<keepawake::AwakeHandle>, Option<SessionIdleInhibit>);
+struct SystemInhibit(std::process::Child);
+
+impl SystemInhibit {
+    fn new(idle: bool, sleep: bool) -> Option<Self> {
+        let what = match (idle, sleep) {
+            (true, true) => "idle:sleep",
+            (true, false) => "idle",
+            (false, true) => "sleep",
+            (false, false) => return None,
+        };
+        match std::process::Command::new("systemd-inhibit")
+            .args([
+                "--what",
+                what,
+                "--who",
+                "RustDesk",
+                "--why",
+                "Remote desktop session",
+                "--mode",
+                "block",
+                "sleep",
+                "infinity",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => Some(Self(child)),
+            Err(err) => {
+                log::info!("wakelock: systemd-inhibit is unavailable ({err})");
+                None
+            }
+        }
+    }
+}
+
+impl Drop for SystemInhibit {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.kill() {
+            log::debug!("wakelock: failed to stop systemd-inhibit ({err})");
+        }
+        if let Err(err) = self.0.wait() {
+            log::debug!("wakelock: failed to reap systemd-inhibit ({err})");
+        }
+    }
+}
+
+pub struct WakeLock(Option<SystemInhibit>, Option<SessionIdleInhibit>);
 
 impl WakeLock {
     pub fn new(display: bool, idle: bool, sleep: bool) -> Self {
-        match keepawake::Builder::new()
-            .display(display)
-            .idle(idle)
-            .sleep(sleep)
-            .create()
-        {
-            Ok(handle) => WakeLock(Some(handle), None),
-            Err(err) => {
-                // Not `.ok()`: a discarded error is how a login screen ran with no inhibitor at
-                // all and nobody noticed.
-                log::info!("wakelock: keepawake could not take the inhibit ({err})");
-                // keepawake asks for the ScreenSaver inhibit first and abandons the whole request
-                // if it fails, losing the logind idle/sleep inhibits that stop the HOST suspending
-                // mid-session. Re-ask without the display part: those are on the system bus.
-                let system = if idle || sleep {
-                    match keepawake::Builder::new()
-                        .display(false)
-                        .idle(idle)
-                        .sleep(sleep)
-                        .create()
-                    {
-                        Ok(handle) => Some(handle),
-                        Err(err) => {
-                            log::info!(
-                                "wakelock: the logind idle/sleep inhibit did not come back \
-                                 either ({err})"
-                            );
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-                let session = if display {
-                    SessionIdleInhibit::new("incoming session")
-                } else {
-                    None
-                };
-                WakeLock(system, session)
-            }
-        }
+        let system = SystemInhibit::new(idle, sleep);
+        let session = display
+            .then(|| SessionIdleInhibit::new("remote desktop session"))
+            .flatten();
+        WakeLock(system, session)
     }
 }
 
