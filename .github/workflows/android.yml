@@ -228,11 +228,18 @@ jobs:
           test -x "$apksigner"
           "$apksigner" verify --verbose apk/*.apk
 
-      - name: Upload apk
+      - name: Upload signed apk
         if: env.skip != '1' && inputs.release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}-apk
+          path: apk
+
+      - name: Upload unsigned apk
+        if: ${{ env.skip != '1' && !inputs.release }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}-unsigned-apk
           path: apk
 
       - name: Remove Android signing material
