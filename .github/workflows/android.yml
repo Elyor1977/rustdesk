@@ -218,6 +218,12 @@ jobs:
             test -n "$ANDROID_CERT_SHA256" || { echo "ANDROID_CERT_SHA256 is required"; exit 1; }
             printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > ./flutter/android/app/release.jks
             keytool -list -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" >/dev/null
+            expected=$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+            expected=${expected#SHA256}
+            expected=${expected#SHA-256}
+            [[ "$expected" =~ ^[0-9A-F]{64}$ ]] || { echo "::error::ANDROID_CERT_SHA256 must contain a SHA-256 certificate fingerprint"; exit 1; }
+            actual=$(keytool -exportcert -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" | sha256sum | awk '{print toupper($1)}')
+            [ "$actual" = "$expected" ] || { echo "::error::ANDROID_CERT_SHA256 does not match the keystore certificate. Set it to: $actual"; exit 1; }
             printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release.jks\n' "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_ALIAS" > ./flutter/android/key.properties
           fi
           cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ matrix.job.sysroot }}/libc++_shared.so ./flutter/android/app/src/main/jniLibs/${{ matrix.job.abi }}/
@@ -238,7 +244,10 @@ jobs:
           "$apksigner" verify --verbose apk/*.apk
           actual=$("$apksigner" verify --print-certs apk/*.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
           expected=$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
-          test -n "$actual" && test "$actual" = "$expected"
+          expected=${expected#SHA256}
+          expected=${expected#SHA-256}
+          test -n "$actual"
+          [ "$actual" = "$expected" ] || { echo "::error::APK certificate fingerprint mismatch. Expected $expected, got $actual"; exit 1; }
 
       - name: Upload signed apk
         if: env.skip != '1' && inputs.release

@@ -46,6 +46,10 @@ Create these secrets:
 keytool -list -v -keystore rustdesk-release.jks -alias rustdesk
 ```
 
+Copy only the 64 hexadecimal characters after `SHA256:`. Colons and the
+`SHA256:` prefix are also accepted by the workflow. Do not use the SHA-1
+fingerprint or the SHA-256 hash of the `.jks` file.
+
 Never replace or lose the Android keystore after publishing an application. Updates must use the same signing key.
 
 ## Protected release

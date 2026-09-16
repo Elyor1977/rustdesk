@@ -72,13 +72,6 @@ jobs:
         with:
           prefix-key: bridge-${{ matrix.job.os }}
 
-      - name: Cache Bridge
-        id: cache-bridge
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: /tmp/flutter_rust_bridge
-          key: bridge-${{ matrix.job.flutter-version }}
-
       - name: Install flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
