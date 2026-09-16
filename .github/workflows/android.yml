@@ -20,17 +20,13 @@ on:
         required: false
       ANDROID_CERT_SHA256:
         required: false
-  workflow_dispatch:
+  workflow_dispatch: # Unsigned build only; signed releases must pass release.yml approval.
     inputs:
       arch:
         description: "Architecture"
         type: choice
         default: aarch64
         options: [aarch64, armv7, x86_64, all]
-      release:
-        description: "Sign and upload release artifacts"
-        type: boolean
-        default: true
   pull_request:
     paths:
       - ".github/workflows/android.yml"
@@ -101,7 +97,7 @@ jobs:
 
       - name: Export GitHub Actions cache environment variables
         if: env.skip != '1'
-        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
@@ -119,7 +115,7 @@ jobs:
 
       - name: Checkout source code
         if: env.skip != '1'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           submodules: recursive
 

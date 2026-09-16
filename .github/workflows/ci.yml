@@ -3,6 +3,7 @@ name: CI
 env:
 #   MIN_SUPPORTED_RUST_VERSION: "1.46.0"
 #   CICD_INTERMEDIATES_DIR: "_cicd-intermediates"
+  RUST_VERSION: "1.88"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   # for multiarch gcc compatibility
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
@@ -35,6 +36,7 @@ jobs:
   ensure_cargo_fmt:
     name: Check formatting of changed Rust files
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
     - name: Checkout source code
       uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -44,7 +46,7 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
       with:
-        toolchain: stable
+        toolchain: ${{ env.RUST_VERSION }}
         components: rustfmt
     - name: Check changed Rust files
       shell: bash
@@ -62,7 +64,7 @@ jobs:
         fi
         mapfile -d '' files < <(
           git diff --name-only -z --diff-filter=ACMRT "$base" "$GITHUB_SHA" -- \
-            'src/**/*.rs' 'libs/base/**/*.rs'
+            '*.rs' ':(exclude)libs/hbb_common/**'
         )
         if ((${#files[@]})); then
           rustfmt --edition 2021 --check --config skip_children=true "${files[@]}"
@@ -71,6 +73,7 @@ jobs:
   cargo_audit:
     name: Check RustSec advisories (cargo audit)
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
     - name: Checkout source code
       uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -79,7 +82,7 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
       with:
-        toolchain: stable
+        toolchain: ${{ env.RUST_VERSION }}
     - name: Run cargo audit
       run: |
         cargo install cargo-audit --version 0.22.0 --locked
@@ -90,7 +93,7 @@ jobs:
   #   runs-on: ubuntu-20.04
   #   steps:
   #   - name: Checkout source code
-  #     uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+  #     uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
   #     with:
   #       submodules: recursive
 
@@ -115,6 +118,7 @@ jobs:
   build:
     name: ${{ matrix.job.target }} (${{ matrix.job.os }})
     runs-on: ${{ matrix.job.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -205,9 +209,9 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
       with:
-        toolchain: stable
+        toolchain: ${{ env.RUST_VERSION }}
         targets: ${{ matrix.job.target }}
-        components: ''
+        components: clippy
 
     - name: Show version information (Rust, cargo, GCC)
       shell: bash
@@ -227,14 +231,7 @@ jobs:
 
     - name: Run clippy
       shell: bash
-      run: |
-        rustup component add clippy
-        cargo clippy --locked --target=${{ matrix.job.target }} --lib --bins
-
-    - name: clean
-      shell: bash
-      run: |
-        cargo clean
+      run: cargo clippy --locked --target=${{ matrix.job.target }} --lib --bins
 
     # - name: Strip debug information from executable
     #   id: strip
@@ -288,7 +285,6 @@ jobs:
             ;;
         esac;
 
-        #deprecated echo ::set-output name=CARGO_TEST_OPTIONS::${CARGO_TEST_OPTIONS}
         echo "CARGO_TEST_OPTIONS=${CARGO_TEST_OPTIONS}" >> $GITHUB_ENV
         echo "CARGO_TEST_OPTIONS=${CARGO_TEST_OPTIONS}" >> $GITHUB_OUTPUT
 

@@ -7238,12 +7238,13 @@ mod test {
         let listener = hbb_common::tcp::new_listener("127.0.0.1:0", false)
             .await
             .unwrap();
-        let host = listener.local_addr().unwrap().to_string();
-        let controller = hbb_common::socket_client::connect_tcp(host, 3000)
+        let host = listener.local_addr().unwrap();
+        let controller = hbb_common::tokio::net::TcpStream::connect(host)
             .await
             .unwrap();
         let (accepted, addr) = listener.accept().await.unwrap();
         let served = Stream::Tcp(hbb_common::tcp::FramedStream::from(accepted, addr));
+        let controller = Stream::Tcp(hbb_common::tcp::FramedStream::from(controller, host));
         (served, controller, addr)
     }
 
