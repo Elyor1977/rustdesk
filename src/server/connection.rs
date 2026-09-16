@@ -24,6 +24,11 @@ use crate::{
 };
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::{common::DEVICE_NAME, flutter::connection_manager::start_channel};
+use base::{
+    config::keys,
+    fs::{self, can_enable_overwrite_detection, JobType},
+    message_proto::{option_message::BoolOption, permission_info::Permission},
+};
 use cidr_utils::cidr::IpCidr;
 #[cfg(target_os = "android")]
 use hbb_common::protobuf::EnumOrUnknown;
@@ -44,11 +49,6 @@ use hbb_common::{
         time::{self, Duration, Instant},
     },
     tokio_util::codec::{BytesCodec, Framed},
-};
-use base::{
-    config::keys,
-    fs::{self, can_enable_overwrite_detection, JobType},
-    message_proto::{option_message::BoolOption, permission_info::Permission},
 };
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use scrap::android::{call_main_service_key_event, call_main_service_pointer_input};
@@ -85,11 +85,8 @@ const LOGIN_FAILURE_TTL_MINUTES: i32 = 30;
 // Hard cap on the number of tracked addresses/prefixes per bucket, to bound memory.
 const LOGIN_FAILURES_MAX_ENTRIES: usize = 10_000;
 const LOGIN_FAILURE_EVICT_BATCH: usize = 1_000;
-static LOGIN_FAILURE_LAST_PRUNE: [AtomicI32; 3] = [
-    AtomicI32::new(0),
-    AtomicI32::new(0),
-    AtomicI32::new(0),
-];
+static LOGIN_FAILURE_LAST_PRUNE: [AtomicI32; 3] =
+    [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
 
 /// A connection not authorized within this long of starting is closed, however alive it
 /// keeps itself: a wrong password, a pending 2FA, an accept prompt or an admin-terminal
@@ -4027,7 +4024,9 @@ impl Connection {
                         self.refresh_video_display(Some(request.display as usize));
                     }
                 }
-                Some(message::Union::PortForwardChannel(ch)) => self.handle_port_forward_channel(ch),
+                Some(message::Union::PortForwardChannel(ch)) => {
+                    self.handle_port_forward_channel(ch)
+                }
                 Some(message::Union::TerminalAction(action)) => {
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     allow_err!(self.handle_terminal_action(action).await);
@@ -7071,10 +7070,7 @@ fn maintain_login_failures(
     make_login_failure_room(failures, incoming);
 }
 
-fn make_login_failure_room(
-    failures: &mut HashMap<String, (i32, i32, i32)>,
-    incoming: usize,
-) {
+fn make_login_failure_room(failures: &mut HashMap<String, (i32, i32, i32)>, incoming: usize) {
     let required = failures
         .len()
         .saturating_add(incoming)
@@ -7083,9 +7079,7 @@ fn make_login_failure_room(
         return;
     }
     // Reclaim a batch so a distributed attack cannot force a full sort for every new address.
-    let evict = required
-        .max(LOGIN_FAILURE_EVICT_BATCH)
-        .min(failures.len());
+    let evict = required.max(LOGIN_FAILURE_EVICT_BATCH).min(failures.len());
     let mut victims: Vec<(i32, i32, String)> = failures
         .iter()
         .map(|(k, v)| (v.0, v.2, k.clone()))
@@ -7158,10 +7152,7 @@ mod test {
             LOGIN_FAILURES_MAX_ENTRIES - LOGIN_FAILURE_EVICT_BATCH
         );
         assert!(!failures.contains_key("address-0"));
-        assert!(failures.contains_key(&format!(
-            "address-{}",
-            LOGIN_FAILURES_MAX_ENTRIES - 1
-        )));
+        assert!(failures.contains_key(&format!("address-{}", LOGIN_FAILURES_MAX_ENTRIES - 1)));
     }
 
     #[test]
