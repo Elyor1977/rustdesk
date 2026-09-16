@@ -37,7 +37,7 @@ impl Error for ParseError {
 }
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_string())
+        f.write_str(self.description())
     }
 }
 
@@ -180,5 +180,10 @@ mod tests {
             tokenize("{+CTRL}{{this}} is going to fail}"),
             Err(ParseError::UnmatchedClose)
         );
+    }
+
+    #[test]
+    fn display_error() {
+        assert_eq!(ParseError::UnknownTag("TEST".into()).to_string(), "Unknown tag");
     }
 }
