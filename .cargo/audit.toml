@@ -1,3 +1,4 @@
 [advisories]
-# No fixed release exists; RustDesk does not use supplementary groups for authorization.
+# hbb_common still exposes users 0.11, but RustDesk never calls its vulnerable group-listing APIs.
+# Client-only lookups use the maintained uzers fork through libs/base.
 ignore = ["RUSTSEC-2025-0040"]

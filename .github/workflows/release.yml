@@ -10,14 +10,30 @@ permissions:
   id-token: write
   attestations: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  approve:
+    name: Approve signed release
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Validate release ref
+        run: test "$GITHUB_REF_TYPE" = "tag" && [[ "$GITHUB_REF_NAME" == v* ]]
+
   windows:
+    needs: approve
     uses: ./.github/workflows/windows-x64.yml
     with:
       release: true
     secrets: inherit
 
   android:
+    needs: approve
     uses: ./.github/workflows/android.yml
     with:
       arch: all
@@ -57,7 +73,12 @@ jobs:
       - name: Generate SBOM and checksums
         run: |
           rm -f release/SHA256SUMS.txt
-          syft dir:. -o cyclonedx-json=release/rustdesk.sbom.json
+          shopt -s nullglob
+          artifacts=(release/*.apk release/*.exe release/*.msi)
+          test "${#artifacts[@]}" -gt 0
+          for artifact in "${artifacts[@]}"; do
+            syft "$artifact" -o "cyclonedx-json=${artifact}.sbom.json"
+          done
           cd release
           sha256sum rustdesk-* > SHA256SUMS.txt
 

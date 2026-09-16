@@ -6,11 +6,7 @@ edition = "2021"
 build= "build.rs"
 description = "RustDesk Remote Desktop"
 default-run = "rustdesk"
-# 1.75 is the toolchain CI still builds Linux/Windows/Android with (RUST_VERSION / SCITER_RUST_VERSION in
-# .github/workflows/flutter-build.yml; sciter breaks on >=1.78, see rustdesk/rustdesk#7503). Only the
-# macOS job uses 1.81 (MAC_RUST_VERSION, required by cidre). Raising this field above 1.75 would make
-# cargo refuse to build on those runners, so keep it at the real minimum.
-rust-version = "1.75"
+rust-version = "1.88"
 
 [lib]
 name = "librustdesk"
@@ -200,6 +196,7 @@ gtk = "0.18"
 termios = "0.3"
 terminfo = "0.8"
 winit = "0.30"
+users = { package = "uzers", version = "0.12.2" }
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

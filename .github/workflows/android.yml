@@ -18,6 +18,8 @@ on:
         required: false
       ANDROID_KEY_PASSWORD:
         required: false
+      ANDROID_CERT_SHA256:
+        required: false
   workflow_dispatch:
     inputs:
       arch:
@@ -57,6 +59,13 @@ env:
   NDK_VERSION: "r28c"
   SELECTED_ARCH: ${{ inputs.arch || 'aarch64' }}
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}-${{ inputs.arch || 'aarch64' }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   generate-bridge:
@@ -201,6 +210,7 @@ jobs:
           ANDROID_ALIAS: ${{ secrets.ANDROID_ALIAS }}
           ANDROID_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
@@ -209,6 +219,7 @@ jobs:
             test -n "$ANDROID_ALIAS" || { echo "ANDROID_ALIAS is required"; exit 1; }
             test -n "$ANDROID_KEY_STORE_PASSWORD" || { echo "ANDROID_KEY_STORE_PASSWORD is required"; exit 1; }
             test -n "$ANDROID_KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD is required"; exit 1; }
+            test -n "$ANDROID_CERT_SHA256" || { echo "ANDROID_CERT_SHA256 is required"; exit 1; }
             printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > ./flutter/android/app/release.jks
             keytool -list -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" >/dev/null
             printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release.jks\n' "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_ALIAS" > ./flutter/android/key.properties
@@ -223,10 +234,15 @@ jobs:
       - name: Verify APK signature
         if: env.skip != '1' && inputs.release
         shell: bash
+        env:
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
         run: |
           apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)
           test -x "$apksigner"
           "$apksigner" verify --verbose apk/*.apk
+          actual=$("$apksigner" verify --print-certs apk/*.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+          expected=$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+          test -n "$actual" && test "$actual" = "$expected"
 
       - name: Upload signed apk
         if: env.skip != '1' && inputs.release

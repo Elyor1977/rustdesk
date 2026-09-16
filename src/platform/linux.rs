@@ -18,7 +18,6 @@ use hbb_common::{
     libc::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
     log,
     regex::{Captures, Regex},
-    users::{get_user_by_name, os::unix::UserExt},
 };
 use base::message_proto::{DisplayInfo, Resolution};
 use libxdo_sys::{self, xdo_t, Window};
@@ -33,6 +32,7 @@ use std::{
     time::{Duration, Instant},
 };
 use terminfo::{capability as cap, Database};
+use users::{get_user_by_name, os::unix::UserExt};
 use wallpaper;
 
 pub const PA_SAMPLE_RATE: u32 = 48000;

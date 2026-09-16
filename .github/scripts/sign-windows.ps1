@@ -11,6 +11,9 @@ if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
 if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
     throw "WINDOWS_CERTIFICATE_PASSWORD is required"
 }
+if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_THUMBPRINT)) {
+    throw "WINDOWS_CERTIFICATE_THUMBPRINT is required"
+}
 
 $target = (Resolve-Path -LiteralPath $Path).Path
 $files = if ((Get-Item -LiteralPath $target).PSIsContainer) {
@@ -43,11 +46,20 @@ try {
     if (-not $certificate) {
         throw "The Windows signing certificate has no private key"
     }
+    $expectedThumbprint = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+    $actualThumbprint = ($certificate.Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+    if ($expectedThumbprint.Length -ne 40 -or $actualThumbprint -ne $expectedThumbprint) {
+        throw "The Windows signing certificate thumbprint does not match WINDOWS_CERTIFICATE_THUMBPRINT"
+    }
 
     foreach ($file in $files) {
         & $signTool.FullName sign /sha1 $certificate.Thumbprint /s My /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $file.FullName
         if ($LASTEXITCODE -ne 0) {
             throw "Signing failed: $($file.Name)"
+        }
+        & $signTool.FullName verify /pa /all $file.FullName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Signature verification failed: $($file.Name)"
         }
     }
 } finally {

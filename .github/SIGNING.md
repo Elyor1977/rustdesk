@@ -14,8 +14,16 @@ Create these secrets:
 
 - `WINDOWS_CERTIFICATE_BASE64`: clipboard value from the command above.
 - `WINDOWS_CERTIFICATE_PASSWORD`: PFX export password.
+- `WINDOWS_CERTIFICATE_THUMBPRINT`: expected 40-character certificate thumbprint.
 
-The Windows workflow signs EXE, DLL, and MSI files with SHA-256 and a trusted timestamp. Manual builds are unsigned by default. Enable `release` only after both secrets are configured.
+Read the thumbprint before uploading the certificate:
+
+```powershell
+$password = Read-Host -AsSecureString
+(Get-PfxData -FilePath 'certificate.pfx' -Password $password).EndEntityCertificates.Thumbprint
+```
+
+The Windows workflow signs EXE, DLL, and MSI files with SHA-256 and a trusted timestamp. Manual builds are unsigned by default. Enable `release` only after all three secrets are configured.
 
 ## Android
 
@@ -32,5 +40,14 @@ Create these secrets:
 - `ANDROID_ALIAS`: keystore alias, for example `rustdesk`.
 - `ANDROID_KEY_STORE_PASSWORD`: keystore password.
 - `ANDROID_KEY_PASSWORD`: key password.
+- `ANDROID_CERT_SHA256`: SHA-256 certificate fingerprint shown by the command below.
+
+```powershell
+keytool -list -v -keystore rustdesk-release.jks -alias rustdesk
+```
 
 Never replace or lose the Android keystore after publishing an application. Updates must use the same signing key.
+
+## Protected release
+
+Create a GitHub Environment named `release` under **Settings → Environments** and require manual approval. Protect tags matching `v*` with a repository ruleset. A version tag waits for approval before any signing or publication starts.

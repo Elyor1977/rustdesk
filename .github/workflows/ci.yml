@@ -24,6 +24,13 @@ on:
       - "appimage/**"
       - "flatpak/**"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 jobs:
   ensure_cargo_fmt:
     name: Ensure 'cargo fmt' has been run
