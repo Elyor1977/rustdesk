@@ -2139,7 +2139,7 @@ async fn secure_tcp_silent(conn: &mut Stream, key: &str) -> ResultType<()> {
 /// `secure_tcp` keeps tolerating such a server, which the paths from before the exchange depend
 /// on. WebSocket is treated as `secure_tcp` treats it, as a transport that is encrypted already.
 pub async fn secure_tcp_required(conn: &mut Stream, key: &str) -> ResultType<()> {
-    if use_ws() {
+    if matches!(conn, Stream::WebSocket(_)) {
         return Ok(());
     }
     if key_exchange(conn, key, true).await? {
