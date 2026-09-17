@@ -75,7 +75,7 @@ default-net = "0.14"
 wol-rs = "1.0"
 flutter_rust_bridge = { version = "=1.80", features = ["uuid"], optional = true}
 errno = "0.3"
-rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "23e24dd6b35452a495dae0ae6d99395e9755ab0f" }
+rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "a361d86a8b0245f3618a9efb375c149530a6b599" }
 url = { version = "2.3", features = ["serde"] }
 crossbeam-queue = "0.3"
 hex = "0.4"
