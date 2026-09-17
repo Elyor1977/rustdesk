@@ -1,6 +1,6 @@
 use super::{gtk_sudo, CursorData, ResultType};
-use desktop::Desktop;
 pub use base::platform::linux::*;
+use desktop::Desktop;
 
 #[cfg(feature = "drm")]
 pub fn dispatch_wayland_display_probe() {
@@ -10,6 +10,7 @@ pub fn dispatch_wayland_display_probe() {
         wayland_display_probe_child_main();
     }
 }
+use base::message_proto::{DisplayInfo, Resolution};
 use hbb_common::{
     allow_err,
     anyhow::anyhow,
@@ -19,7 +20,6 @@ use hbb_common::{
     log,
     regex::{Captures, Regex},
 };
-use base::message_proto::{DisplayInfo, Resolution};
 use libxdo_sys::{self, xdo_t, Window};
 use std::{
     cell::RefCell,
@@ -896,14 +896,9 @@ fn try_start_server_(desktop: Option<&Desktop>) -> ResultType<Option<Child>> {
             if !desktop.dbus.is_empty() {
                 envs.push(("DBUS_SESSION_BUS_ADDRESS", desktop.dbus.clone()));
             }
-            if let Ok(forced_display_server) =
-                std::env::var("RUSTDESK_FORCED_DISPLAY_SERVER")
-            {
+            if let Ok(forced_display_server) = std::env::var("RUSTDESK_FORCED_DISPLAY_SERVER") {
                 if !forced_display_server.is_empty() {
-                    envs.push((
-                        "RUSTDESK_FORCED_DISPLAY_SERVER",
-                        forced_display_server,
-                    ));
+                    envs.push(("RUSTDESK_FORCED_DISPLAY_SERVER", forced_display_server));
                 }
             }
             envs.push((
@@ -2396,10 +2391,7 @@ mod desktop {
                 // Xwayland display and xauth may not be available in a short time after login.
                 // Avoid scanning processes on X11, where Xwayland discovery cannot provide any
                 // useful session information.
-                if self.is_wayland()
-                    && !self.is_login_wayland()
-                    && is_xwayland_running(&self.uid)
-                {
+                if self.is_wayland() && !self.is_login_wayland() && is_xwayland_running(&self.uid) {
                     self.get_display_xauth_xwayland();
                 } else if self.is_wayland() {
                     self.get_display_xauth_wayland();
@@ -2538,11 +2530,8 @@ impl SessionIdleInhibit {
         let mut refused = Vec::new();
         for target in SESSION_INHIBIT_TARGETS {
             let res: Result<(u32,), dbus::Error> = {
-                let proxy = conn.with_proxy(
-                    target.dest,
-                    target.path,
-                    std::time::Duration::from_secs(3),
-                );
+                let proxy =
+                    conn.with_proxy(target.dest, target.path, std::time::Duration::from_secs(3));
                 if target.gnome_shape {
                     // Inhibit(s app_id, u xid, s reason, u flags) -> u cookie; xid 0 = no window.
                     proxy.method_call(

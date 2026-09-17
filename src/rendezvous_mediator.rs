@@ -11,6 +11,7 @@ use std::{
 
 use uuid::Uuid;
 
+use base::config::keys::*;
 use hbb_common::{
     allow_err,
     anyhow::{self, bail},
@@ -30,7 +31,6 @@ use hbb_common::{
     webrtc::WebRTCStream,
     AddrMangle, IntoTargetAddr, ResultType, Stream, TargetAddr,
 };
-use base::config::keys::*;
 
 use crate::{
     check_port,
@@ -833,7 +833,9 @@ impl RendezvousMediator {
         let stream_for_remote_ice = stream.clone();
         tokio::spawn(async move {
             while let Some(candidate) = remote_ice_rx.recv().await {
-                if let Err(err) = stream_for_remote_ice.add_remote_ice_candidate(&candidate).await
+                if let Err(err) = stream_for_remote_ice
+                    .add_remote_ice_candidate(&candidate)
+                    .await
                 {
                     if let Some(n) = REJECTED_REMOTE_ICE_LOG.due() {
                         log::warn!(

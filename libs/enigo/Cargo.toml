@@ -22,7 +22,7 @@ appveyor = { repository = "pythoneer/enigo-85xiy" }
 serde = { version = "1.0", optional = true }
 serde_derive = { version = "1.0", optional = true }
 log = "0.4"
-rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "23e24dd6b35452a495dae0ae6d99395e9755ab0f" }
+rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "a361d86a8b0245f3618a9efb375c149530a6b599" }
 tfc = { git = "https://github.com/rustdesk-org/The-Fat-Controller", rev = "78bb80a8e596e4c14ae57c8448f5fca75f91f2b0" }
 hbb_common = { path = "../hbb_common" }
 base = { path = "../base" }

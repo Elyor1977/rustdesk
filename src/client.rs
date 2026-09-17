@@ -31,7 +31,9 @@ use crate::{
     check_port,
     common::input::{MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_TYPE_DOWN, MOUSE_TYPE_UP},
     create_symmetric_key_msg, decode_id_pk, decode_id_pk_dtls, dtls_fingerprint_bound, get_rs_pk,
-    is_keyboard_mode_supported, kcp_stream::KcpStream, secure_tcp, secure_tcp_required,
+    is_keyboard_mode_supported,
+    kcp_stream::KcpStream,
+    secure_tcp, secure_tcp_required,
     ui_interface::{get_builtin_option, resolve_avatar_url, use_texture_render},
     ui_session_interface::{InvokeUiSession, Session},
 };
@@ -51,8 +53,8 @@ use hbb_common::{
     anyhow::{anyhow, Context},
     bail,
     config::{
-        self, use_ws, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution,
-        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS,
+        self, use_ws, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution, CONNECT_TIMEOUT,
+        READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS,
     },
     futures::future::{select_ok, BoxFuture, FutureExt},
     get_version_number, log,
@@ -121,11 +123,9 @@ pub const LOGIN_SCREEN_WAYLAND: &str = "Wayland login screen is not supported";
 #[cfg(target_os = "linux")]
 pub const SCRAP_UBUNTU_HIGHER_REQUIRED: &str = "ubuntu-21-04-required";
 #[cfg(target_os = "linux")]
-pub const SCRAP_OTHER_VERSION_OR_X11_REQUIRED: &str =
-    "wayland-requires-higher-linux-version";
+pub const SCRAP_OTHER_VERSION_OR_X11_REQUIRED: &str = "wayland-requires-higher-linux-version";
 #[cfg(target_os = "linux")]
-pub const SCRAP_XDP_PORTAL_UNAVAILABLE: &str =
-    "xdp-portal-unavailable";
+pub const SCRAP_XDP_PORTAL_UNAVAILABLE: &str = "xdp-portal-unavailable";
 pub const SCRAP_X11_REQUIRED: &str = "x11 expected";
 pub const SCRAP_X11_REF_URL: &str = "https://rustdesk.com/docs/en/manual/linux/#x11-required";
 
@@ -980,9 +980,7 @@ impl Client {
                 if remaining.is_zero() {
                     break;
                 }
-                let timeout_ms = remaining
-                    .as_millis()
-                    .clamp(1, u64::MAX as u128) as u64;
+                let timeout_ms = remaining.as_millis().clamp(1, u64::MAX as u128) as u64;
                 let Some(msg_in) =
                     crate::get_next_nonkeyexchange_msg(&mut socket, Some(timeout_ms)).await
                 else {
@@ -1575,7 +1573,10 @@ impl Client {
                 // WebRTC won the race but identity/DTLS binding failed; fall back to a freshly
                 // coordinated relay instead of failing the whole attempt. The guard is dropped
                 // first so the bad pc is closed promptly.
-                log::warn!("WebRTC secure handshake failed ({}), falling back to relay", e);
+                log::warn!(
+                    "WebRTC secure handshake failed ({}), falling back to relay",
+                    e
+                );
                 drop(webrtc_guard.take());
                 match Self::request_relay(
                     peer_id,
@@ -2394,7 +2395,9 @@ impl AudioHandler {
 
         self.sample_rate = (format0.sample_rate, config.sample_rate.0);
         let audio_resampler = create_audio_resampler(
-            format0.sample_rate, config.sample_rate.0, format0.channels as _,
+            format0.sample_rate,
+            config.sample_rate.0,
+            format0.channels as _,
         )?;
         let mut build_output_stream = |config: StreamConfig| match sample_format {
             cpal::SampleFormat::I8 => self.build_output_stream::<i8>(&config, &device),
@@ -4550,7 +4553,10 @@ async fn is_switch_sides_back(conn_type: ConnType, interface: &impl Interface) -
     lc.id == id && current_uuid.as_ref() == Some(&uuid)
 }
 
-#[cfg(not(all(feature = "flutter", not(any(target_os = "android", target_os = "ios")))))]
+#[cfg(not(all(
+    feature = "flutter",
+    not(any(target_os = "android", target_os = "ios"))
+)))]
 async fn is_switch_sides_back(_conn_type: ConnType, _interface: &impl Interface) -> bool {
     false
 }
@@ -5788,6 +5794,10 @@ mod webrtc_race_tests {
         .await
         .unwrap_err()
         .to_string();
-        assert!(err.contains("webrtc dead") && err.contains("relay dead"), "{}", err);
+        assert!(
+            err.contains("webrtc dead") && err.contains("relay dead"),
+            "{}",
+            err
+        );
     }
 }
