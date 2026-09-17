@@ -24,6 +24,11 @@ use crate::{
 };
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::{common::DEVICE_NAME, flutter::connection_manager::start_channel};
+use base::{
+    config::keys,
+    fs::{self, can_enable_overwrite_detection, JobType},
+    message_proto::{option_message::BoolOption, permission_info::Permission},
+};
 use cidr_utils::cidr::IpCidr;
 #[cfg(target_os = "android")]
 use hbb_common::protobuf::EnumOrUnknown;
@@ -45,11 +50,6 @@ use hbb_common::{
     },
     tokio_util::codec::{BytesCodec, Framed},
 };
-use base::{
-    config::keys,
-    fs::{self, can_enable_overwrite_detection, JobType},
-    message_proto::{option_message::BoolOption, permission_info::Permission},
-};
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use scrap::android::{call_main_service_key_event, call_main_service_pointer_input};
 use scrap::camera;
@@ -62,7 +62,7 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicI64, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering},
         mpsc as std_mpsc,
     },
 };
@@ -79,6 +79,14 @@ const FAILURE_IDX_ID_WHITELIST: usize = 2;
 // How long a rejection counts, so also how long a blocked address stays blocked. Longer
 // throttles enumeration harder; shorter limits collateral on whitelisted neighbours.
 const ID_WHITELIST_FAILURE_DECAY_MINUTES: i32 = 10;
+// Entries of `LOGIN_FAILURES` older than this (minutes since the last failure) are dropped,
+// so the cumulative "too many wrong attempts" block is lifted after the same period.
+const LOGIN_FAILURE_TTL_MINUTES: i32 = 30;
+// Hard cap on the number of tracked addresses/prefixes per bucket, to bound memory.
+const LOGIN_FAILURES_MAX_ENTRIES: usize = 10_000;
+const LOGIN_FAILURE_EVICT_BATCH: usize = 1_000;
+static LOGIN_FAILURE_LAST_PRUNE: [AtomicI32; 3] =
+    [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
 
 /// A connection not authorized within this long of starting is closed, however alive it
 /// keeps itself: a wrong password, a pending 2FA, an accept prompt or an admin-terminal
@@ -4016,7 +4024,9 @@ impl Connection {
                         self.refresh_video_display(Some(request.display as usize));
                     }
                 }
-                Some(message::Union::PortForwardChannel(ch)) => self.handle_port_forward_channel(ch),
+                Some(message::Union::PortForwardChannel(ch)) => {
+                    self.handle_port_forward_channel(ch)
+                }
                 Some(message::Union::TerminalAction(action)) => {
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     allow_err!(self.handle_terminal_action(action).await);
@@ -4345,6 +4355,7 @@ impl Connection {
         // Bump the prefixes, fetching existing values
         if let Some((p64, p56, p48)) = self.get_ipv6_prefixes() {
             let mut m = map_mutex.lock().unwrap();
+            maintain_login_failures(&mut m, time, i, 4);
             for key in [p64, p56, p48] {
                 let cur = m.get(&key).copied().unwrap_or((0, 0, 0));
                 m.insert(key, Self::bump_failure_entry(cur, time));
@@ -4354,6 +4365,7 @@ impl Connection {
         } else {
             // Re-read the full IP bucket in case another failed attempt updated it.
             let mut m = map_mutex.lock().unwrap();
+            maintain_login_failures(&mut m, time, i, 1);
             let current_ip = m.get(&self.ip).copied().unwrap_or((0, 0, 0));
             m.insert(self.ip.clone(), Self::bump_failure_entry(current_ip, time));
         }
@@ -4438,6 +4450,10 @@ impl Connection {
             };
             return (((0, 0, 0), time), res);
         }
+
+        // Expire stale entries first so both the per-minute and the cumulative
+        // (`.2 > 30`) blocks are lifted after `LOGIN_FAILURE_TTL_MINUTES`.
+        maintain_login_failures(&mut LOGIN_FAILURES[i].lock().unwrap(), time, i, 0);
 
         // IPv6 addresses are cheap to make so we check prefix/netblock as well
         if let Some((p64, p56, p48)) = self.get_ipv6_prefixes() {
@@ -7037,6 +7053,43 @@ fn decay_stale_failures(
     }
 }
 
+fn maintain_login_failures(
+    failures: &mut HashMap<String, (i32, i32, i32)>,
+    now: i32,
+    bucket: usize,
+    incoming: usize,
+) {
+    let last = LOGIN_FAILURE_LAST_PRUNE[bucket].load(Ordering::Acquire);
+    if last != now
+        && LOGIN_FAILURE_LAST_PRUNE[bucket]
+            .compare_exchange(last, now, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    {
+        failures.retain(|_, v| now.saturating_sub(v.0) < LOGIN_FAILURE_TTL_MINUTES);
+    }
+    make_login_failure_room(failures, incoming);
+}
+
+fn make_login_failure_room(failures: &mut HashMap<String, (i32, i32, i32)>, incoming: usize) {
+    let required = failures
+        .len()
+        .saturating_add(incoming)
+        .saturating_sub(LOGIN_FAILURES_MAX_ENTRIES);
+    if required == 0 {
+        return;
+    }
+    // Reclaim a batch so a distributed attack cannot force a full sort for every new address.
+    let evict = required.max(LOGIN_FAILURE_EVICT_BATCH).min(failures.len());
+    let mut victims: Vec<(i32, i32, String)> = failures
+        .iter()
+        .map(|(k, v)| (v.0, v.2, k.clone()))
+        .collect();
+    victims.sort_unstable();
+    for (_, _, key) in victims.into_iter().take(evict) {
+        failures.remove(&key);
+    }
+}
+
 // Unconditionally forget `keys`, unlike `update_failure`'s remove path which requires the
 // per-address entry to exist.
 fn clear_failures(failures: &mut HashMap<String, (i32, i32, i32)>, keys: &[String]) {
@@ -7084,6 +7137,22 @@ mod test {
 
     fn unauthorized_count() -> usize {
         UNAUTHORIZED_CONNS.lock().unwrap().len()
+    }
+
+    #[test]
+    fn test_login_failure_capacity_is_reclaimed_in_batches() {
+        let mut failures: HashMap<_, _> = (0..LOGIN_FAILURES_MAX_ENTRIES)
+            .map(|i| (format!("address-{i}"), (i as i32, 1, 1)))
+            .collect();
+
+        make_login_failure_room(&mut failures, 1);
+
+        assert_eq!(
+            failures.len(),
+            LOGIN_FAILURES_MAX_ENTRIES - LOGIN_FAILURE_EVICT_BATCH
+        );
+        assert!(!failures.contains_key("address-0"));
+        assert!(failures.contains_key(&format!("address-{}", LOGIN_FAILURES_MAX_ENTRIES - 1)));
     }
 
     #[test]
@@ -7169,12 +7238,13 @@ mod test {
         let listener = hbb_common::tcp::new_listener("127.0.0.1:0", false)
             .await
             .unwrap();
-        let host = listener.local_addr().unwrap().to_string();
-        let controller = hbb_common::socket_client::connect_tcp(host, 3000)
+        let host = listener.local_addr().unwrap();
+        let controller = hbb_common::tokio::net::TcpStream::connect(host)
             .await
             .unwrap();
         let (accepted, addr) = listener.accept().await.unwrap();
         let served = Stream::Tcp(hbb_common::tcp::FramedStream::from(accepted, addr));
+        let controller = Stream::Tcp(hbb_common::tcp::FramedStream::from(controller, host));
         (served, controller, addr)
     }
 

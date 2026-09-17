@@ -2139,7 +2139,7 @@ async fn secure_tcp_silent(conn: &mut Stream, key: &str) -> ResultType<()> {
 /// `secure_tcp` keeps tolerating such a server, which the paths from before the exchange depend
 /// on. WebSocket is treated as `secure_tcp` treats it, as a transport that is encrypted already.
 pub async fn secure_tcp_required(conn: &mut Stream, key: &str) -> ResultType<()> {
-    if use_ws() {
+    if matches!(conn, Stream::WebSocket(_)) {
         return Ok(());
     }
     if key_exchange(conn, key, true).await? {
@@ -3296,7 +3296,7 @@ mod tests {
     }
 
     /// A stand-in rendezvous server on loopback: accepts one connection and hands it to `serve`.
-    async fn rendezvous_stub<F, Fut>(serve: F) -> String
+    async fn rendezvous_stub<F, Fut>(serve: F) -> std::net::SocketAddr
     where
         F: FnOnce(hbb_common::tcp::FramedStream) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -3304,7 +3304,7 @@ mod tests {
         let listener = hbb_common::tcp::new_listener("127.0.0.1:0", false)
             .await
             .unwrap();
-        let host = listener.local_addr().unwrap().to_string();
+        let host = listener.local_addr().unwrap();
         tokio::spawn(async move {
             if let Ok((stream, addr)) = listener.accept().await {
                 serve(hbb_common::tcp::FramedStream::from(stream, addr)).await;
@@ -3318,10 +3318,9 @@ mod tests {
         (encode64(pk.0), sk)
     }
 
-    async fn connect(host: &str) -> Stream {
-        hbb_common::socket_client::connect_tcp(host.to_owned(), 3000)
-            .await
-            .unwrap()
+    async fn connect(host: std::net::SocketAddr) -> Stream {
+        let stream = tokio::net::TcpStream::connect(host).await.unwrap();
+        Stream::from(stream, host)
     }
 
     #[tokio::test]
@@ -3335,12 +3334,12 @@ mod tests {
             sleep(Duration::from_secs(2)).await;
         };
         let host = rendezvous_stub(serve).await;
-        let mut conn = connect(&host).await;
+        let mut conn = connect(host).await;
         assert!(secure_tcp_required(&mut conn, &key).await.is_err());
         assert!(!conn.is_secured());
         // The legacy call tolerates the same server, and the stream stays in the clear.
         let host = rendezvous_stub(serve).await;
-        let mut conn = connect(&host).await;
+        let mut conn = connect(host).await;
         secure_tcp(&mut conn, &key).await.unwrap();
         assert!(!conn.is_secured());
     }
@@ -3349,7 +3348,7 @@ mod tests {
     async fn test_secure_tcp_required_refuses_a_closed_connection() {
         let (key, _) = server_key();
         let host = rendezvous_stub(|s| async move { drop(s) }).await;
-        let mut conn = connect(&host).await;
+        let mut conn = connect(host).await;
         assert!(secure_tcp_required(&mut conn, &key).await.is_err());
         assert!(!conn.is_secured());
     }
@@ -3374,7 +3373,7 @@ mod tests {
             hbb_common::tcp::Encrypt::decode(&ex.keys[1], &ex.keys[0], &eph_sk).unwrap();
         })
         .await;
-        let mut conn = connect(&host).await;
+        let mut conn = connect(host).await;
         secure_tcp_required(&mut conn, &key).await.unwrap();
         assert!(conn.is_secured());
     }

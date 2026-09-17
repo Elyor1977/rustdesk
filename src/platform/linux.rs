@@ -1,6 +1,6 @@
 use super::{gtk_sudo, CursorData, ResultType};
-use desktop::Desktop;
 pub use base::platform::linux::*;
+use desktop::Desktop;
 
 #[cfg(feature = "drm")]
 pub fn dispatch_wayland_display_probe() {
@@ -10,6 +10,7 @@ pub fn dispatch_wayland_display_probe() {
         wayland_display_probe_child_main();
     }
 }
+use base::message_proto::{DisplayInfo, Resolution};
 use hbb_common::{
     allow_err,
     anyhow::anyhow,
@@ -18,9 +19,7 @@ use hbb_common::{
     libc::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
     log,
     regex::{Captures, Regex},
-    users::{get_user_by_name, os::unix::UserExt},
 };
-use base::message_proto::{DisplayInfo, Resolution};
 use libxdo_sys::{self, xdo_t, Window};
 use std::{
     cell::RefCell,
@@ -33,10 +32,12 @@ use std::{
     time::{Duration, Instant},
 };
 use terminfo::{capability as cap, Database};
+use users::{get_user_by_name, os::unix::UserExt};
 use wallpaper;
 
 pub const PA_SAMPLE_RATE: u32 = 48000;
-static mut UNMODIFIED: bool = true;
+// Never written at runtime; a plain immutable static needs no synchronization.
+static UNMODIFIED: bool = true;
 
 #[derive(Clone, Debug)]
 struct ActiveUserLookupCache {
@@ -895,14 +896,9 @@ fn try_start_server_(desktop: Option<&Desktop>) -> ResultType<Option<Child>> {
             if !desktop.dbus.is_empty() {
                 envs.push(("DBUS_SESSION_BUS_ADDRESS", desktop.dbus.clone()));
             }
-            if let Ok(forced_display_server) =
-                std::env::var("RUSTDESK_FORCED_DISPLAY_SERVER")
-            {
+            if let Ok(forced_display_server) = std::env::var("RUSTDESK_FORCED_DISPLAY_SERVER") {
                 if !forced_display_server.is_empty() {
-                    envs.push((
-                        "RUSTDESK_FORCED_DISPLAY_SERVER",
-                        forced_display_server,
-                    ));
+                    envs.push(("RUSTDESK_FORCED_DISPLAY_SERVER", forced_display_server));
                 }
             }
             envs.push((
@@ -1285,7 +1281,7 @@ pub fn is_login_wayland() -> bool {
 
 #[inline]
 pub fn current_is_wayland() -> bool {
-    return is_desktop_wayland() && unsafe { UNMODIFIED };
+    return is_desktop_wayland() && UNMODIFIED;
 }
 
 // to-do: test the other display manager
@@ -1357,7 +1353,7 @@ pub fn is_prelogin() -> bool {
         return false;
     }
     let name = get_active_username();
-    if let Ok(res) = run_cmds(&format!("getent passwd {}", name)) {
+    if let Ok(res) = run_cmds(&format!("getent passwd {}", shell_quote(&name))) {
         return res.contains("/bin/false") || res.contains("/usr/sbin/nologin");
     }
     false
@@ -1879,11 +1875,31 @@ fn get_xrandr_conn_pat(name: &str) -> String {
     )
 }
 
+// Compiled once per display name: `resolutions()` is called frequently and the
+// pattern only depends on `name`.
+fn get_xrandr_resolutions_re(name: &str) -> Option<Regex> {
+    lazy_static::lazy_static! {
+        static ref XRANDR_RESOLUTIONS_RE: std::sync::Mutex<std::collections::HashMap<String, Regex>> = Default::default();
+    }
+    const RESOLUTIONS_PAT: &str = r"(?P<resolutions>(\s*\d+x\d+\s+\d+.*\n)+)";
+    let mut cache = XRANDR_RESOLUTIONS_RE.lock().unwrap();
+    if let Some(re) = cache.get(name) {
+        return Some(re.clone());
+    }
+    let re = Regex::new(&format!("{}{}", get_xrandr_conn_pat(name), RESOLUTIONS_PAT)).ok()?;
+    cache.insert(name.to_owned(), re.clone());
+    Some(re)
+}
+
 pub fn resolutions(name: &str) -> Vec<Resolution> {
-    let resolutions_pat = r"(?P<resolutions>(\s*\d+x\d+\s+\d+.*\n)+)";
-    let connected_pat = get_xrandr_conn_pat(name);
+    lazy_static::lazy_static! {
+        static ref RESOLUTION_RE: Option<Regex> = Regex::new(
+            r"\s*(?P<width>\d+)x(?P<height>\d+)\s+(?P<rates>(\d+\.\d+\D*)+)\s*\n"
+        )
+        .ok();
+    }
     let mut v = vec![];
-    if let Ok(re) = Regex::new(&format!("{}{}", connected_pat, resolutions_pat)) {
+    if let Some(re) = get_xrandr_resolutions_re(name) {
         match run_cmds("xrandr --query | tr -s ' '") {
             Ok(xrandr_output) => {
                 // There'are different kinds of xrandr output.
@@ -1911,9 +1927,7 @@ pub fn resolutions(name: &str) -> Vec<Resolution> {
                     */
                 if let Some(caps) = re.captures(&xrandr_output) {
                     if let Some(resolutions) = caps.name("resolutions") {
-                        let resolution_pat =
-                            r"\s*(?P<width>\d+)x(?P<height>\d+)\s+(?P<rates>(\d+\.\d+\D*)+)\s*\n";
-                        let Ok(resolution_re) = Regex::new(&format!(r"{}", resolution_pat)) else {
+                        let Some(resolution_re) = RESOLUTION_RE.as_ref() else {
                             log::error!("Regex new failed");
                             return vec![];
                         };
@@ -2224,8 +2238,8 @@ mod desktop {
             self.home = "".to_string();
 
             let cmd = format!(
-                "getent passwd '{}' | awk -F':' '{{print $6}}'",
-                &self.username
+                "getent passwd {} | awk -F':' '{{print $6}}'",
+                shell_quote(&self.username)
             );
             self.home = run_cmds_trim_newline(&cmd).unwrap_or(format!("/home/{}", &self.username));
         }
@@ -2233,7 +2247,7 @@ mod desktop {
         fn get_xauth_from_xorg(&mut self) {
             if let Ok(output) = run_cmds(&format!(
                 "ps -u {} -f | grep 'Xorg' | grep -v 'grep'",
-                &self.uid
+                shell_quote(&self.uid)
             )) {
                 for line in output.lines() {
                     let mut auth_found = false;
@@ -2377,10 +2391,7 @@ mod desktop {
                 // Xwayland display and xauth may not be available in a short time after login.
                 // Avoid scanning processes on X11, where Xwayland discovery cannot provide any
                 // useful session information.
-                if self.is_wayland()
-                    && !self.is_login_wayland()
-                    && is_xwayland_running(&self.uid)
-                {
+                if self.is_wayland() && !self.is_login_wayland() && is_xwayland_running(&self.uid) {
                     self.get_display_xauth_xwayland();
                 } else if self.is_wayland() {
                     self.get_display_xauth_wayland();
@@ -2459,7 +2470,6 @@ mod desktop {
 }
 
 /// A session-bus idle-inhibit interface, tried in order; the first that answers wins.
-/// `org.freedesktop.ScreenSaver` is absent on purpose: that is the one `keepawake` already tried.
 struct SessionInhibitTarget {
     dest: &'static str,
     path: &'static str,
@@ -2474,6 +2484,13 @@ struct SessionInhibitTarget {
 const GNOME_INHIBIT_IDLE: u32 = 8;
 
 const SESSION_INHIBIT_TARGETS: &[SessionInhibitTarget] = &[
+    SessionInhibitTarget {
+        dest: "org.freedesktop.ScreenSaver",
+        path: "/org/freedesktop/ScreenSaver",
+        iface: "org.freedesktop.ScreenSaver",
+        gnome_shape: false,
+        uninhibit: "UnInhibit",
+    },
     // Measured on a GDM greeter: output held 129.9 s with the inhibit, 30.3 s without.
     SessionInhibitTarget {
         dest: "org.gnome.SessionManager",
@@ -2493,8 +2510,6 @@ const SESSION_INHIBIT_TARGETS: &[SessionInhibitTarget] = &[
     },
 ];
 
-/// Idle inhibit for the case `keepawake` cannot serve: it inhibits `org.freedesktop.ScreenSaver`,
-/// which a GDM greeter bus neither provides nor can activate, so its `create()` fails outright.
 /// The connection is kept because the inhibit is bound to it: dropping it releases the inhibit.
 struct SessionIdleInhibit {
     conn: dbus::blocking::Connection,
@@ -2515,11 +2530,8 @@ impl SessionIdleInhibit {
         let mut refused = Vec::new();
         for target in SESSION_INHIBIT_TARGETS {
             let res: Result<(u32,), dbus::Error> = {
-                let proxy = conn.with_proxy(
-                    target.dest,
-                    target.path,
-                    std::time::Duration::from_secs(3),
-                );
+                let proxy =
+                    conn.with_proxy(target.dest, target.path, std::time::Duration::from_secs(3));
                 if target.gnome_shape {
                     // Inhibit(s app_id, u xid, s reason, u flags) -> u cookie; xid 0 = no window.
                     proxy.method_call(
@@ -2574,51 +2586,63 @@ impl Drop for SessionIdleInhibit {
     }
 }
 
-pub struct WakeLock(Option<keepawake::AwakeHandle>, Option<SessionIdleInhibit>);
+struct SystemInhibit(std::process::Child);
+
+impl SystemInhibit {
+    fn new(idle: bool, sleep: bool) -> Option<Self> {
+        let what = match (idle, sleep) {
+            (true, true) => "idle:sleep",
+            (true, false) => "idle",
+            (false, true) => "sleep",
+            (false, false) => return None,
+        };
+        match std::process::Command::new("systemd-inhibit")
+            .args([
+                "--what",
+                what,
+                "--who",
+                "RustDesk",
+                "--why",
+                "Remote desktop session",
+                "--mode",
+                "block",
+                "sleep",
+                "infinity",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => Some(Self(child)),
+            Err(err) => {
+                log::info!("wakelock: systemd-inhibit is unavailable ({err})");
+                None
+            }
+        }
+    }
+}
+
+impl Drop for SystemInhibit {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.kill() {
+            log::debug!("wakelock: failed to stop systemd-inhibit ({err})");
+        }
+        if let Err(err) = self.0.wait() {
+            log::debug!("wakelock: failed to reap systemd-inhibit ({err})");
+        }
+    }
+}
+
+pub struct WakeLock(Option<SystemInhibit>, Option<SessionIdleInhibit>);
 
 impl WakeLock {
     pub fn new(display: bool, idle: bool, sleep: bool) -> Self {
-        match keepawake::Builder::new()
-            .display(display)
-            .idle(idle)
-            .sleep(sleep)
-            .create()
-        {
-            Ok(handle) => WakeLock(Some(handle), None),
-            Err(err) => {
-                // Not `.ok()`: a discarded error is how a login screen ran with no inhibitor at
-                // all and nobody noticed.
-                log::info!("wakelock: keepawake could not take the inhibit ({err})");
-                // keepawake asks for the ScreenSaver inhibit first and abandons the whole request
-                // if it fails, losing the logind idle/sleep inhibits that stop the HOST suspending
-                // mid-session. Re-ask without the display part: those are on the system bus.
-                let system = if idle || sleep {
-                    match keepawake::Builder::new()
-                        .display(false)
-                        .idle(idle)
-                        .sleep(sleep)
-                        .create()
-                    {
-                        Ok(handle) => Some(handle),
-                        Err(err) => {
-                            log::info!(
-                                "wakelock: the logind idle/sleep inhibit did not come back \
-                                 either ({err})"
-                            );
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-                let session = if display {
-                    SessionIdleInhibit::new("incoming session")
-                } else {
-                    None
-                };
-                WakeLock(system, session)
-            }
-        }
+        let system = SystemInhibit::new(idle, sleep);
+        let session = display
+            .then(|| SessionIdleInhibit::new("remote desktop session"))
+            .flatten();
+        WakeLock(system, session)
     }
 }
 
