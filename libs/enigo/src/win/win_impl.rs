@@ -106,23 +106,24 @@ fn get_error() -> String {
             errno,
             0,
             buff.as_mut_ptr(),
-            (buff_size + 1) as u32,
+            buff_size as u32,
             std::ptr::null_mut(),
         );
         if chars_copied == 0 {
             return "".to_owned();
         }
-        let mut curr_char: usize = chars_copied as usize;
+        // `chars_copied` excludes the terminating NUL; never trust it beyond the buffer.
+        let mut curr_char: usize = (chars_copied as usize).min(buff_size);
+        // Strip trailing control characters (e.g. "\r\n").
         while curr_char > 0 {
-            let ch = buff[curr_char];
+            let ch = buff[curr_char - 1];
 
             if ch >= ' ' as u16 {
                 break;
             }
             curr_char -= 1;
         }
-        let sl = std::slice::from_raw_parts(buff.as_ptr(), curr_char);
-        let err_msg = String::from_utf16(sl);
+        let err_msg = String::from_utf16(&buff[..curr_char]);
         return err_msg.unwrap_or("".to_owned());
     }
 }

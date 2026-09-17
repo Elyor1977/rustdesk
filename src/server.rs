@@ -7,6 +7,7 @@ use std::{
 
 use bytes::Bytes;
 
+use base::message_proto::*;
 pub use connection::*;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use hbb_common::config::Config2;
@@ -23,7 +24,6 @@ use hbb_common::{
     sodiumoxide::crypto::{box_, sign},
     timeout, tokio, ResultType, Stream,
 };
-use base::message_proto::*;
 use scrap::camera;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use service::ServiceTmpl;
@@ -69,9 +69,9 @@ pub mod input_service {
 }
 
 mod connection;
+pub mod display_service;
 mod login_failure_check;
 pub(crate) mod port_forward_mux;
-pub mod display_service;
 #[cfg(windows)]
 pub mod portable_service;
 mod service;

@@ -758,7 +758,7 @@ fn error_dialog_and_exit(err_msg: &str, exit_code: i32) {
 
 fn quote_shell_arg(arg: &str, add_splash_if_match: bool) -> String {
     let mut rv = arg.to_string();
-    let re = hbb_common::regex::Regex::new("(\\s|[][!\"#$&'()*,;<=>?\\^`{}|~])");
+    let re = hbb_common::regex::Regex::new(r##"[\s\[\]!"#$&'()*,;<=>?\^`{}|~]"##);
     let Ok(re) = re else {
         return rv;
     };
@@ -769,4 +769,17 @@ fn quote_shell_arg(arg: &str, add_splash_if_match: bool) -> String {
         }
     }
     rv
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quote_shell_arg;
+
+    #[test]
+    fn quotes_shell_metacharacters() {
+        assert_eq!(quote_shell_arg("plain", true), "plain");
+        assert_eq!(quote_shell_arg("hello world", true), "'hello world'");
+        assert_eq!(quote_shell_arg("a[b]", true), "'a[b]'");
+        assert_eq!(quote_shell_arg("a'b", true), "'a'\\''b'");
+    }
 }
