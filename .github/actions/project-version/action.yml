@@ -1,0 +1,10 @@
+name: Read project version
+description: Export the Cargo package version as VERSION
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        version=$(python3 ./build.py --print-version)
+        test -n "$version"
+        echo "VERSION=$version" >> "$GITHUB_ENV"

@@ -5,9 +5,17 @@ on:
     # schedule build every night
   #  - cron: "0/6 * * * *"
   workflow_dispatch:
+    inputs:
+      upload-artifact:
+        description: "Publish playground artifacts"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 env:
-  RUST_VERSION: "1.75" # https://github.com/rustdesk/rustdesk/discussions/7503
+  RUST_VERSION: "1.88"
   CARGO_NDK_VERSION: "3.1.2"
   LLVM_VERSION: "15.0.6"
   FLUTTER_VERSION: "3.22.2"
@@ -17,7 +25,6 @@ env:
   TAG_NAME: "nightly"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-  VERSION: "1.5.0"
   NDK_VERSION: "r26d"
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
@@ -79,17 +86,23 @@ jobs:
             }
     steps:
       - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Checkout source code
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ matrix.job.ref }}
           submodules: recursive
+
+      - name: Read project version
+        shell: bash
+        run: |
+          version=$(python3 -c 'import pathlib, re; print(re.search(r"^version\s*=\s*\"([^\"]+)\"", pathlib.Path("Cargo.toml").read_text(), re.MULTILINE).group(1))')
+          echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Import the codesign cert
         if: env.MACOS_P12_BASE64 != null
@@ -166,13 +179,13 @@ jobs:
           
       - name: Restore from cache and install vcpkg
         uses: lukka/run-vcpkg@8a5116de2b552d6fc8894e9774aacaf2e5db4823 # v7 2026-05-26
-        if: false
+        if: vars.ENABLE_LEGACY_JOBS == 'true'
         with:
           setupOnly: true
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
       - name: Install vcpkg dependencies
-        if: false
+        if: vars.ENABLE_LEGACY_JOBS == 'true'
         run: |
           $VCPKG_ROOT/vcpkg install libvpx libyuv opus aom
 
@@ -222,7 +235,8 @@ jobs:
           done
 
       - name: Publish DMG package
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
@@ -231,7 +245,7 @@ jobs:
 
 
   build-rustdesk-android:
-    if: false
+    if: vars.ENABLE_LEGACY_JOBS == 'true'
     name: build rustdesk android apk ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
     strategy:
@@ -247,10 +261,16 @@ jobs:
             }
     steps:
       - name: Checkout source code
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ matrix.job.ref }}
           submodules: recursive
+
+      - name: Read project version
+        shell: bash
+        run: |
+          version=$(python3 -c 'import pathlib, re; print(re.search(r"^version\s*=\s*\"([^\"]+)\"", pathlib.Path("Cargo.toml").read_text(), re.MULTILINE).group(1))')
+          echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: |
@@ -392,7 +412,7 @@ jobs:
           esac
           popd
           mkdir -p signed-apk; pushd signed-apk
-          mv ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk ./rustdesk-test-${{ matrix.job.ref }}-${{ matrix.job.ndk }}.apk
+          mv ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk ./rustdesk-test-${{ matrix.job.ref }}-${{ env.NDK_VERSION }}.apk
 
       - uses: r0adkll/sign-android-release@349ebdef58775b1e0d8099458af0816dc79b6407 # v1
         name: Sign app APK
@@ -409,7 +429,8 @@ jobs:
           BUILD_TOOLS_VERSION: "30.0.2"
 
       - name: Publish signed apk package
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}

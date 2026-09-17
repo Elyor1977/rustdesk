@@ -1,0 +1,33 @@
+name: Android signed
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture"
+        type: choice
+        default: all
+        options: [aarch64, armv7, x86_64, all]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-signed-${{ github.ref }}-${{ inputs.arch }}
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    name: Approve Android signing
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - run: echo "Android signed build approved"
+
+  build:
+    needs: approve
+    uses: ./.github/workflows/android.yml
+    with:
+      arch: ${{ inputs.arch }}
+      release: true
+    secrets: inherit

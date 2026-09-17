@@ -1,0 +1,283 @@
+name: Windows unsigned
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
+    secrets:
+      WINDOWS_CERTIFICATE_BASE64:
+        required: false
+      WINDOWS_CERTIFICATE_PASSWORD:
+        required: false
+      WINDOWS_CERTIFICATE_THUMBPRINT:
+        required: false
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-x64.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "res/msi/**"
+      - "src/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/windows-x64.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "res/msi/**"
+      - "src/**"
+
+env:
+  RUST_VERSION: "1.88"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  FLUTTER_ENGINE_SHA256: "ec8cabf36ee4ff24c8d98de25b00e70781eb03876265aee84d0fe554a110036e"
+  USBMMIDD_SHA256: "629b51e9944762bae73948171c65d09a79595cf4c771a82ebc003fbba5b24f51"
+  PRINTER_DRIVER_SHA256: "c4cf4d3b48c4d9079b243edc43bb1db03b076282bc259c9f49883e9db20fa8b5"
+  PRINTER_ADAPTER_SHA256: "e90e5d52c8807b4c6293c78a52479338715e0bf396b1b34802777b8c452e6781"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-x64-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-RustDeskTempTopMostWindow:
+    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
+    with:
+      upload-artifact: true
+      target: windows-2022
+      configuration: Release
+      platform: x64
+      target_version: Windows10
+
+  build-windows-x64:
+    name: x86_64-pc-windows-msvc
+    needs: [build-RustDeskTempTopMostWindow, generate-bridge]
+    runs-on: windows-2022
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+
+      - name: Read project version
+        id: version
+        run: |
+          $version = python3 .\build.py --print-version
+          if (-not $version) { throw "Cargo.toml package version is missing" }
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0 # v2.0.9
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install flutter
+        id: flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      - name: Replace engine with rustdesk custom flutter engine
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          if ((Get-FileHash windows-x64-release.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.FLUTTER_ENGINE_SHA256 }}') { throw "Flutter engine checksum mismatch" }
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Patch flutter
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: windows-2022
+
+      - name: Install CMake required by vcpkg
+        run: |
+          python3 -m pip install --disable-pip-version-check cmake==4.4.0
+          cmake --version
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if "$VCPKG_ROOT/vcpkg" install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              find "${VCPKG_ROOT}/" -name "*.log" | while read -r log_file; do echo "$log_file:"; cat "$log_file"; echo; done
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+
+      - name: Build rustdesk
+        run: |
+          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+
+          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          if ((Get-FileHash usbmmidd_v2.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.USBMMIDD_SHA256 }}') { throw "usbmmidd checksum mismatch" }
+          Expand-Archive usbmmidd_v2.zip -DestinationPath .
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
+          mv -Force .\usbmmidd_v2 ./rustdesk
+
+          Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile rustdesk_printer_driver_v4-1.4.zip
+          Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile printer_driver_adapter.zip
+          if ((Get-FileHash rustdesk_printer_driver_v4-1.4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.PRINTER_DRIVER_SHA256 }}') { throw "Printer driver checksum mismatch" }
+          if ((Get-FileHash printer_driver_adapter.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${{ env.PRINTER_ADAPTER_SHA256 }}') { throw "Printer adapter checksum mismatch" }
+          Expand-Archive rustdesk_printer_driver_v4-1.4.zip -DestinationPath .
+          mkdir ./rustdesk/drivers
+          mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
+          Expand-Archive printer_driver_adapter.zip -DestinationPath .
+          mv -Force .\printer_driver_adapter.dll ./rustdesk
+
+      - name: find Runner.res
+        shell: bash
+        run: |
+          runner_res=$(find . -name "Runner.res")
+          test -n "$runner_res"
+          cp "$runner_res" ./libs/portable/Runner.res
+
+      - name: Download RustDeskTempTopMostWindow artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: topmostwindow-artifacts-x64
+          path: "./rustdesk"
+
+      - name: Validate signing configuration
+        if: inputs.release
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_THUMBPRINT)) { throw "Windows signing secrets are required" }
+
+      - name: Sign application files
+        if: inputs.release
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: .\.github\scripts\sign-windows.ps1 -Path .\rustdesk
+
+      - name: Upload unpacked folder
+        if: inputs.release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-windows-x86_64-folder
+          path: rustdesk
+
+      - name: Build self-extracted executable
+        shell: bash
+        run: |
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          popd
+          mkdir -p ./Output
+          mv ./target/release/rustdesk-portable-packer.exe ./Output/rustdesk-${{ steps.version.outputs.value }}-x86_64.exe
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+
+      - name: Build msi
+        run: |
+          pushd ./res/msi
+          python preprocess.py --arp -d ../../rustdesk
+          nuget restore msi.sln
+          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
+          $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
+          if (-not $msi) { throw "MSI output is missing" }
+          mv $msi.FullName ../../Output/rustdesk-${{ steps.version.outputs.value }}-x86_64.msi
+
+      - name: Sign installers
+        if: inputs.release
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: .\.github\scripts\sign-windows.ps1 -Path .\Output
+
+      - name: Verify installers and write checksums
+        run: |
+          $artifacts = @(Get-ChildItem ./Output -File | Where-Object Extension -in '.exe', '.msi')
+          if ($artifacts.Count -ne 2) { throw "Expected EXE and MSI outputs" }
+          if ('${{ inputs.release }}' -eq 'true') {
+            foreach ($artifact in $artifacts) {
+              if ((Get-AuthenticodeSignature $artifact.FullName).Status -ne 'Valid') { throw "Invalid Authenticode signature: $($artifact.Name)" }
+            }
+          }
+          $lines = $artifacts | Sort-Object Name | ForEach-Object { "{0} *{1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+          Set-Content -Path ./Output/SHA256SUMS.txt -Value $lines
+
+      - name: Upload installers
+        if: inputs.release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-windows-x86_64-installers
+          path: Output
+
+      - name: Upload unsigned installers
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-windows-x86_64-unsigned-installers
+          path: Output
