@@ -1,4 +1,4 @@
-name: Windows x64 only
+name: Windows unsigned
 
 on:
   workflow_call:
@@ -13,7 +13,7 @@ on:
         required: false
       WINDOWS_CERTIFICATE_THUMBPRINT:
         required: false
-  workflow_dispatch: # Unsigned build only; signed releases must pass release.yml approval.
+  workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/windows-x64.yml"

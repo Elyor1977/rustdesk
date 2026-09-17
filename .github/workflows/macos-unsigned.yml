@@ -1,4 +1,4 @@
-name: All platforms unsigned
+name: macOS unsigned
 
 on:
   workflow_dispatch:
@@ -11,5 +11,5 @@ jobs:
     uses: ./.github/workflows/flutter-build.yml
     with:
       upload-artifact: true
-      platform: all
+      platform: macos
       publish-release: false

@@ -23,7 +23,7 @@ $password = Read-Host -AsSecureString
 (Get-PfxData -FilePath 'certificate.pfx' -Password $password).EndEntityCertificates.Thumbprint
 ```
 
-The Windows workflow signs EXE, DLL, and MSI files with SHA-256 and a trusted timestamp. Manual builds are unsigned by default. Enable `release` only after all three secrets are configured.
+The Windows workflow signs EXE, DLL, and MSI files with SHA-256 and a trusted timestamp.
 
 ## Android
 
@@ -55,3 +55,14 @@ Never replace or lose the Android keystore after publishing an application. Upda
 ## Protected release
 
 Create a GitHub Environment named `release` under **Settings → Environments** and require manual approval. Protect tags matching `v*` with a repository ruleset. A version tag waits for approval before any signing or publication starts.
+
+## Manual builds
+
+Run workflows independently under **Actions**:
+
+- `Windows unsigned` or `Windows signed`.
+- `Android unsigned` or `Android signed`.
+- `Linux unsigned`, `macOS unsigned`, or `iOS unsigned`.
+- `All platforms unsigned` only when every unsigned platform is needed.
+
+Signed workflows wait for approval from the `release` environment. Unsigned workflows do not receive signing secrets and never publish a GitHub release.

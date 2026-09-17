@@ -18,7 +18,7 @@ use core_graphics::{
     window::{kCGWindowName, kCGWindowOwnerPID},
 };
 use hbb_common::{
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     bail, log,
     sysinfo::{Pid, Process, ProcessRefreshKind, System},
 };

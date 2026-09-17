@@ -1,4 +1,4 @@
-name: Android only
+name: Android unsigned
 
 on:
   workflow_call:
@@ -20,7 +20,7 @@ on:
         required: false
       ANDROID_CERT_SHA256:
         required: false
-  workflow_dispatch: # Unsigned build only; signed releases must pass release.yml approval.
+  workflow_dispatch:
     inputs:
       arch:
         description: "Architecture"
