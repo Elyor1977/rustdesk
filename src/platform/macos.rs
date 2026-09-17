@@ -3,6 +3,7 @@
 // https://github.com/rust-windowing/winit
 
 use super::{CursorData, ResultType};
+use base::message_proto::{DisplayInfo, Resolution};
 use cocoa::{
     appkit::{NSApp, NSApplication, NSApplicationActivationPolicy::*},
     base::{id, nil, BOOL, NO, YES},
@@ -18,11 +19,10 @@ use core_graphics::{
     window::{kCGWindowName, kCGWindowOwnerPID},
 };
 use hbb_common::{
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     bail, log,
     sysinfo::{Pid, Process, ProcessRefreshKind, System},
 };
-use base::message_proto::{DisplayInfo, Resolution};
 use include_dir::{include_dir, Dir};
 use objc::rc::autoreleasepool;
 use objc::{class, msg_send, sel, sel_impl};
@@ -32,7 +32,10 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicI32, Ordering},
+        Mutex,
+    },
 };
 
 // macOS boolean_t is defined as `int` in <mach/boolean.h>
@@ -40,7 +43,7 @@ type BooleanT = hbb_common::libc::c_int;
 
 static PRIVILEGES_SCRIPTS_DIR: Dir =
     include_dir!("$CARGO_MANIFEST_DIR/src/platform/privileges_scripts");
-static mut LATEST_SEED: i32 = 0;
+static LATEST_SEED: AtomicI32 = AtomicI32::new(0);
 
 #[inline]
 fn get_update_temp_dir() -> PathBuf {
@@ -560,21 +563,17 @@ pub fn get_cursor() -> ResultType<Option<u64>> {
 }
 
 fn unsafe_get_cursor() -> ResultType<Option<u64>> {
-    unsafe {
-        let seed = CGSCurrentCursorSeed();
-        if seed == LATEST_SEED {
-            return Ok(None);
-        }
-        LATEST_SEED = seed;
+    let seed = unsafe { CGSCurrentCursorSeed() };
+    if seed == LATEST_SEED.load(Ordering::SeqCst) {
+        return Ok(None);
     }
+    LATEST_SEED.store(seed, Ordering::SeqCst);
     let c = get_cursor_id()?;
     Ok(Some(c.1))
 }
 
 pub fn reset_input_cache() {
-    unsafe {
-        LATEST_SEED = 0;
-    }
+    LATEST_SEED.store(0, Ordering::SeqCst);
 }
 
 fn get_cursor_id() -> ResultType<(id, u64)> {
@@ -1030,7 +1029,10 @@ fn backup_update_plist(source: &str, backup: &str) -> ResultType<()> {
             Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            bail!("[root-update] required installed plist is missing: {}", source)
+            bail!(
+                "[root-update] required installed plist is missing: {}",
+                source
+            )
         }
         Err(err) => Err(err.into()),
     }
@@ -1042,7 +1044,10 @@ fn validate_update_tree(path: &Path, framework_root: Option<&Path>) -> ResultTyp
         // Frameworks legitimately use internal symlinks (Resources,
         // Versions/Current), but never allow a link to leave its framework.
         let Some(framework_root) = framework_root else {
-            bail!("[root-update] symlink outside framework: {}", path.display());
+            bail!(
+                "[root-update] symlink outside framework: {}",
+                path.display()
+            );
         };
         let target = std::fs::read_link(path)?;
         let target = if target.is_absolute() {
@@ -1072,7 +1077,10 @@ fn validate_update_tree(path: &Path, framework_root: Option<&Path>) -> ResultTyp
             validate_update_tree(&child, child_framework_root)?;
         }
     } else if !metadata.file_type().is_file() {
-        bail!("[root-update] unsupported file in update bundle: {}", path.display());
+        bail!(
+            "[root-update] unsupported file in update bundle: {}",
+            path.display()
+        );
     }
     Ok(())
 }
@@ -1103,10 +1111,19 @@ pub fn update_from_dmg_as_root(dmg_path: &str, expected_version: &str) -> Result
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp_dir, std::fs::Permissions::from_mode(0o700))?;
     }
-    let agent_plist = format!("/Library/LaunchAgents/com.carriez.{}_server.plist", app_name);
-    let daemon_plist = format!("/Library/LaunchDaemons/com.carriez.{}_service.plist", app_name);
+    let agent_plist = format!(
+        "/Library/LaunchAgents/com.carriez.{}_server.plist",
+        app_name
+    );
+    let daemon_plist = format!(
+        "/Library/LaunchDaemons/com.carriez.{}_service.plist",
+        app_name
+    );
 
-    log::info!("[root-update] Starting silent root update from {}", dmg_path);
+    log::info!(
+        "[root-update] Starting silent root update from {}",
+        dmg_path
+    );
     // Check sessions before extracting to avoid unnecessary work
     if !crate::updater::has_no_active_conns_ipc() {
         bail!("[root-update] Active session detected, deferring update.");
@@ -1204,7 +1221,10 @@ pub fn update_from_dmg_as_root(dmg_path: &str, expected_version: &str) -> Result
     // launching a freshly extracted service binary from /tmp is not required.
     let new_service = format!("{}/Contents/MacOS/service", src_app);
     if !std::path::Path::new(&new_service).is_file() {
-        bail!("[root-update] staged service binary is missing: {}", new_service);
+        bail!(
+            "[root-update] staged service binary is missing: {}",
+            new_service
+        );
     }
     // The new binary writes its own plist definitions after the bundle is
     // moved into its final root-owned location.  This avoids executing code
@@ -1804,7 +1824,10 @@ fn extract_dmg(dmg_path: &str, target_dir: &str) -> ResultType<()> {
 fn extract_dmg_into_existing_dir(dmg_path: &str, target_dir: &str) -> ResultType<()> {
     let target_path = Path::new(target_dir);
     if !target_path.exists() {
-        bail!("[root-update] Temp directory does not exist: {:?}", target_path);
+        bail!(
+            "[root-update] Temp directory does not exist: {:?}",
+            target_path
+        );
     }
     extract_dmg_inner(dmg_path, target_dir)
 }
@@ -2071,25 +2094,76 @@ pub fn elevate(args: Vec<&str>, prompt: &str) -> ResultType<bool> {
     }
 }
 
-pub struct WakeLock(Option<keepawake::AwakeHandle>);
+struct Caffeinate(std::process::Child);
+
+impl Caffeinate {
+    fn new(display: bool, idle: bool, sleep: bool) -> ResultType<Option<Self>> {
+        let mut args = Vec::new();
+        if display {
+            args.push("-d");
+        }
+        if idle {
+            args.push("-i");
+        }
+        if sleep {
+            args.push("-s");
+        }
+        if args.is_empty() {
+            return Ok(None);
+        }
+        let child = std::process::Command::new("/usr/bin/caffeinate")
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .context("failed to start caffeinate")?;
+        Ok(Some(Self(child)))
+    }
+}
+
+impl Drop for Caffeinate {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.kill() {
+            log::debug!("wakelock: failed to stop caffeinate ({err})");
+        }
+        if let Err(err) = self.0.wait() {
+            log::debug!("wakelock: failed to reap caffeinate ({err})");
+        }
+    }
+}
+
+pub struct WakeLock {
+    handle: Option<Caffeinate>,
+    display: bool,
+    idle: bool,
+    sleep: bool,
+}
 
 impl WakeLock {
     pub fn new(display: bool, idle: bool, sleep: bool) -> Self {
-        WakeLock(
-            keepawake::Builder::new()
-                .display(display)
-                .idle(idle)
-                .sleep(sleep)
-                .create()
-                .ok(),
-        )
+        let handle = match Caffeinate::new(display, idle, sleep) {
+            Ok(handle) => handle,
+            Err(err) => {
+                log::info!("wakelock: {err}");
+                None
+            }
+        };
+        Self {
+            handle,
+            display,
+            idle,
+            sleep,
+        }
     }
 
     pub fn set_display(&mut self, display: bool) -> ResultType<()> {
-        self.0
-            .as_mut()
-            .map(|h| h.set_display(display))
-            .ok_or(anyhow!("no AwakeHandle"))?
+        if self.display != display {
+            self.handle = None;
+            self.display = display;
+            self.handle = Caffeinate::new(self.display, self.idle, self.sleep)?;
+        }
+        Ok(())
     }
 }
 

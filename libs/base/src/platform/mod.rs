@@ -7,76 +7,52 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-#[cfg(not(debug_assertions))]
-use hbb_common::{config::Config, log};
-#[cfg(not(debug_assertions))]
-use std::process::exit;
+// Exit code conventionally used for a SIGSEGV-terminated process (128 + 11).
+#[cfg(all(unix, not(debug_assertions)))]
+const BREAKDOWN_EXIT_CODE: libc::c_int = 139;
 
 #[cfg(not(debug_assertions))]
-static mut GLOBAL_CALLBACK: Option<Box<dyn Fn()>> = None;
+const BREAKDOWN_MESSAGE: &[u8] = b"RustDesk: got SIGSEGV, exiting.\n";
 
+// SAFETY: this function runs in signal context, so it must be
+// async-signal-safe: no allocations, no locks, no logging, no config access,
+// no backtrace walking and no user callbacks. Only `write(2)` to stderr with a
+// fixed buffer and `_exit(2)` are used here.
 #[cfg(not(debug_assertions))]
-extern "C" fn breakdown_signal_handler(sig: i32) {
-    let mut stack = vec![];
-    backtrace::trace(|frame| {
-        backtrace::resolve_frame(frame, |symbol| {
-            if let Some(name) = symbol.name() {
-                stack.push(name.to_string());
-            }
-        });
-        true // keep going to the next frame
-    });
-    let mut info = String::default();
-    if stack.iter().any(|s| {
-        s.contains(&"nouveau_pushbuf_kick")
-            || s.to_lowercase().contains("nvidia")
-            || s.contains("gdk_window_end_draw_frame")
-            || s.contains("glGetString")
-    }) {
-        Config::set_option("allow-always-software-render".to_string(), "Y".to_string());
-        info = "Always use software rendering will be set.".to_string();
-        log::info!("{}", info);
-    }
-    if stack.iter().any(|s| {
-        s.to_lowercase().contains("nvidia")
-            || s.to_lowercase().contains("amf")
-            || s.to_lowercase().contains("mfx")
-            || s.contains("cuProfilerStop")
-    }) {
-        Config::set_option("enable-hwcodec".to_string(), "N".to_string());
-        info = "Perhaps hwcodec causing the crash, disable it first".to_string();
-        log::info!("{}", info);
-    }
-    log::error!(
-        "Got signal {} and exit. stack:\n{}",
-        sig,
-        stack.join("\n").to_string()
-    );
-    if !info.is_empty() {
-        #[cfg(target_os = "linux")]
-        linux::system_message(
-            "RustDesk",
-            &format!("Got signal {} and exit.{}", sig, info),
-            true,
-        )
-        .ok();
-    }
+extern "C" fn breakdown_signal_handler(_sig: i32) {
     unsafe {
-        #[allow(static_mut_refs)]
-        if let Some(callback) = &GLOBAL_CALLBACK {
-            callback()
-        }
+        // fd 2 == stderr on every supported platform.
+        libc::write(
+            2,
+            BREAKDOWN_MESSAGE.as_ptr() as *const libc::c_void,
+            BREAKDOWN_MESSAGE.len() as _,
+        );
+        #[cfg(unix)]
+        libc::_exit(BREAKDOWN_EXIT_CODE);
+        // `_exit` is not exposed by the libc crate on Windows; abort() does
+        // not run atexit handlers either and yields a non-zero exit status.
+        #[cfg(not(unix))]
+        std::process::abort();
     }
-    exit(0);
 }
 
+/// Register a SIGSEGV handler that terminates the process with a fixed
+/// message and a non-zero exit code.
+///
+/// The `callback` is accepted for API compatibility only: it is intentionally
+/// not invoked from the signal handler, because arbitrary Rust code is not
+/// async-signal-safe (it may allocate, take locks or re-enter the crashed
+/// code). Cleanup that must happen after a crash should be done on the next
+/// start-up instead.
 #[cfg(not(debug_assertions))]
-pub fn register_breakdown_handler<T>(callback: T)
+pub fn register_breakdown_handler<T>(_callback: T)
 where
     T: Fn() + 'static,
 {
     unsafe {
-        GLOBAL_CALLBACK = Some(Box::new(callback));
-        libc::signal(libc::SIGSEGV, breakdown_signal_handler as _);
+        libc::signal(
+            libc::SIGSEGV,
+            breakdown_signal_handler as libc::sighandler_t,
+        );
     }
 }

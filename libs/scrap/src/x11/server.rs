@@ -25,7 +25,7 @@ impl Server {
     }
 
     pub fn default() -> Result<Rc<Server>, Error> {
-        Ok(Rc::new(Server::connect(ptr::null())?))
+        Ok(Rc::new(unsafe { Server::connect(ptr::null())? }))
         /*
         let mut res = Err(Error::from(0));
         SERVER.with(|xdo| {
@@ -59,7 +59,10 @@ impl Server {
         */
     }
 
-    pub fn connect(addr: *const i8) -> Result<Server, Error> {
+    /// # Safety
+    ///
+    /// `addr` must be null or point to a valid, NUL-terminated X11 display name.
+    pub unsafe fn connect(addr: *const i8) -> Result<Server, Error> {
         unsafe {
             let mut screenp = 0;
             let raw = xcb_connect(addr, &mut screenp);
