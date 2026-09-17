@@ -189,6 +189,9 @@ mod tests {
 
     #[test]
     fn display_error() {
-        assert_eq!(ParseError::UnknownTag("TEST".into()).to_string(), "Unknown tag");
+        assert_eq!(
+            ParseError::UnknownTag("TEST".into()).to_string(),
+            "Unknown tag"
+        );
     }
 }
