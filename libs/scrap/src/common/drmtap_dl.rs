@@ -75,14 +75,14 @@ pub struct drmtap_dmabuf_desc {
     pub dma_buf_fd: c_int, // scanout DMA-BUF; -1 for an already-imported fb_id
     pub width: u32,
     pub height: u32,
-    pub format: u32,           // DRM fourcc of the scanout
-    pub modifier: u64,         // DRM format modifier (tiling/compression)
-    pub fb_id: u32,            // import-once cache key; 0 disables caching
-    pub num_planes: u32,       // used entries in offsets/pitches (1..4); 0 => 1
-    pub offsets: [u32; 4],     // per-plane byte offsets (CCS main+aux+clear-color)
-    pub pitches: [u32; 4],     // per-plane strides; pitches[0] = main stride
-    pub hdr_eotf: u32,         // DRMTAP_EOTF_* (SDR=0, PQ=2, HLG=3)
-    pub hdr_max_nits: u32,     // mastering/content peak luminance cd/m2; 0=unknown
+    pub format: u32,       // DRM fourcc of the scanout
+    pub modifier: u64,     // DRM format modifier (tiling/compression)
+    pub fb_id: u32,        // import-once cache key; 0 disables caching
+    pub num_planes: u32,   // used entries in offsets/pitches (1..4); 0 => 1
+    pub offsets: [u32; 4], // per-plane byte offsets (CCS main+aux+clear-color)
+    pub pitches: [u32; 4], // per-plane strides; pitches[0] = main stride
+    pub hdr_eotf: u32,     // DRMTAP_EOTF_* (SDR=0, PQ=2, HLG=3)
+    pub hdr_max_nits: u32, // mastering/content peak luminance cd/m2; 0=unknown
 }
 
 impl Default for drmtap_dmabuf_desc {
@@ -131,8 +131,7 @@ type FnCursorRelease = unsafe extern "C" fn(*mut drmtap_ctx, *mut drmtap_cursor_
 /// whether `hot_x`/`hot_y` were read from the driver's HOTSPOT_X/Y plane properties: 0 with
 /// `*valid` set, `-EINVAL` on a null argument, and `-ENOTSUP` when nothing recorded an answer,
 /// which is what a cursor read through an older privileged helper produces.
-type FnCursorHotspotValid =
-    unsafe extern "C" fn(*const drmtap_cursor_info, *mut c_int) -> c_int;
+type FnCursorHotspotValid = unsafe extern "C" fn(*const drmtap_cursor_info, *mut c_int) -> c_int;
 // Split-capture entry points (libdrmtap >= 0.4.10), required: `grab_desc` runs on the privileged
 // export side, `open_render`/`convert_dmabuf` on the unprivileged converter side.
 type FnGrabDesc =
@@ -146,8 +145,11 @@ type FnRenderNode = unsafe extern "C" fn(*mut drmtap_ctx) -> *const c_char;
 /// means the compositor can only have rotated in software; `-ENOENT` with no plane bound;
 /// `-EINVAL` on a null argument.
 type FnPlaneRotation = unsafe extern "C" fn(*mut drmtap_ctx, *mut u32) -> c_int;
-type FnConvertDmabuf =
-    unsafe extern "C" fn(*mut drmtap_ctx, *const drmtap_dmabuf_desc, *mut drmtap_frame_info) -> c_int;
+type FnConvertDmabuf = unsafe extern "C" fn(
+    *mut drmtap_ctx,
+    *const drmtap_dmabuf_desc,
+    *mut drmtap_frame_info,
+) -> c_int;
 
 /// The dlopen'd libdrmtap; the `Library` is kept alive for the process lifetime, so the raw fn pointers stay valid.
 pub struct DrmtapLib {
@@ -188,7 +190,11 @@ impl DrmtapLib {
             std::ptr::null_mut()
         }
         unsafe extern "C" fn close(_: *mut drmtap_ctx) {}
-        unsafe extern "C" fn list_displays(_: *mut drmtap_ctx, _: *mut drmtap_display, _: c_int) -> c_int {
+        unsafe extern "C" fn list_displays(
+            _: *mut drmtap_ctx,
+            _: *mut drmtap_display,
+            _: c_int,
+        ) -> c_int {
             0
         }
         unsafe extern "C" fn get_cursor(_: *mut drmtap_ctx, _: *mut drmtap_cursor_info) -> c_int {
@@ -323,8 +329,7 @@ impl DrmtapLib {
             let cursor_release: FnCursorRelease = *lib.get(b"drmtap_cursor_release").ok()?;
             let grab: Option<FnGrabDesc> = lib.get(b"drmtap_grab_desc").ok().map(|s| *s);
             let open_r: Option<FnOpenRender> = lib.get(b"drmtap_open_render").ok().map(|s| *s);
-            let conv: Option<FnConvertDmabuf> =
-                lib.get(b"drmtap_convert_dmabuf").ok().map(|s| *s);
+            let conv: Option<FnConvertDmabuf> = lib.get(b"drmtap_convert_dmabuf").ok().map(|s| *s);
             let (grab_desc, open_render, convert_dmabuf) = match (grab, open_r, conv) {
                 (Some(g), Some(o), Some(c)) => (g, o, c),
                 (grab, open_r, conv) => {
@@ -347,8 +352,7 @@ impl DrmtapLib {
                     return None;
                 }
             };
-            let render_node: Option<FnRenderNode> =
-                lib.get(b"drmtap_render_node").ok().map(|s| *s);
+            let render_node: Option<FnRenderNode> = lib.get(b"drmtap_render_node").ok().map(|s| *s);
             let cursor_hotspot_valid: Option<FnCursorHotspotValid> =
                 lib.get(b"drmtap_cursor_hotspot_valid").ok().map(|s| *s);
             let plane_rotation: Option<FnPlaneRotation> =
@@ -476,7 +480,11 @@ mod tests {
                 "patch 0 of the verified minor must be accepted while the floor is 0"
             );
         } else {
-            assert!(!abi_accepted(DRMTAP_ABI_MAJOR, DRMTAP_ABI_MINOR, floor_patch - 1));
+            assert!(!abi_accepted(
+                DRMTAP_ABI_MAJOR,
+                DRMTAP_ABI_MINOR,
+                floor_patch - 1
+            ));
         }
     }
 

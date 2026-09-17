@@ -690,7 +690,10 @@ impl<T: InvokeUiSession> Remote<T> {
     // Capture after readiness so changes during the read can invalidate the snapshot.
     // A separate task keeps a stalled backend from blocking the connection loop.
     #[cfg(target_os = "linux")]
-    fn spawn_initial_clipboard_read_after_ready(&self, read_clipboard: impl FnOnce() + Send + 'static) {
+    fn spawn_initial_clipboard_read_after_ready(
+        &self,
+        read_clipboard: impl FnOnce() + Send + 'static,
+    ) {
         // Initial-sync wait budget, not a protocol-defined startup deadline.
         const CLIPBOARD_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -777,7 +780,8 @@ impl<T: InvokeUiSession> Remote<T> {
                         return true;
                     }
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-                    Some(message::Union::Clipboard(_)) | Some(message::Union::MultiClipboards(_)) => {
+                    Some(message::Union::Clipboard(_))
+                    | Some(message::Union::MultiClipboards(_)) => {
                         self.initial_clipboard_pending = false;
                     }
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2951,15 +2955,13 @@ mod tests {
             .await
             .unwrap();
         let addr = listener.local_addr().unwrap();
-        let (peer, accepted) = tokio::join!(
-            hbb_common::socket_client::connect_tcp(addr.to_string(), 3000),
-            listener.accept()
-        );
+        let (peer, accepted) =
+            tokio::join!(tokio::net::TcpStream::connect(addr), listener.accept());
         let (accepted, far_addr) = accepted.unwrap();
         let far = Stream::Tcp(hbb_common::tcp::FramedStream::from(accepted, far_addr));
         let (sender, receiver) = mpsc::unbounded_channel::<Data>();
         let remote = Remote::new(Session::<FlutterHandler>::default(), receiver, sender);
-        (remote, peer.unwrap(), far)
+        (remote, Stream::from(peer.unwrap(), addr), far)
     }
 
     async fn arrives(far: &mut Stream) -> bool {

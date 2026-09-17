@@ -11,16 +11,13 @@ use crate::{
     input::*,
     ui_interface::{self, *},
 };
+use base::{config::keys, fs};
 use flutter_rust_bridge::{StreamSink, SyncReturn};
 use hbb_common::{
     config::{self, LocalConfig, PeerConfig, PeerInfoSerde},
     lazy_static, log,
     rendezvous_proto::ConnType,
     ResultType,
-};
-use base::{
-    config::keys,
-    fs,
 };
 use std::{
     collections::HashMap,
@@ -2904,8 +2901,7 @@ pub fn main_set_common(_key: String, _value: String) {
 
 pub fn session_set_common(session_id: SessionID, key: String, value: String) {
     if let Some(s) = sessions::get_session_by_session_id(&session_id) {
-        if key == "continue-insecure-connection"
-        {
+        if key == "continue-insecure-connection" {
             s.continue_insecure_connection(value == "Y");
             return;
         }

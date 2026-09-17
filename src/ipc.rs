@@ -13,11 +13,11 @@ mod ipc_drm;
 // `crate::ipc::DrmDisplayInfo`) keep working, and so the `Data` variants can name the two
 // payload types.
 #[cfg(all(target_os = "linux", feature = "drm"))]
-pub use ipc_drm::{start_drm, DmabufDesc, DrmDisplayInfo};
+pub(crate) use ipc_drm::connect_drm;
 #[cfg(all(target_os = "linux", feature = "drm"))]
 pub(crate) use ipc_drm::DrmConn;
 #[cfg(all(target_os = "linux", feature = "drm"))]
-pub(crate) use ipc_drm::connect_drm;
+pub use ipc_drm::{start_drm, DmabufDesc, DrmDisplayInfo};
 
 use crate::{
     common::{is_server, CheckTestNatType},
@@ -26,6 +26,7 @@ use crate::{
     rendezvous_mediator::RendezvousMediator,
     ui_interface::{get_local_option, set_local_option},
 };
+use base::config::keys::{self, OPTION_ALLOW_WEBSOCKET};
 use bytes::Bytes;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use clipboard::ClipboardFile;
@@ -45,7 +46,8 @@ use hbb_common::{
     tokio_util::codec::Framed,
     ResultType,
 };
-use base::config::keys::{self, OPTION_ALLOW_WEBSOCKET};
+#[cfg(target_os = "macos")]
+use ipc_auth::authorize_user_server_process;
 #[cfg(windows)]
 pub(crate) use ipc_auth::authorize_windows_portable_service_ipc_connection;
 #[cfg(windows)]
@@ -54,8 +56,6 @@ pub(crate) use ipc_auth::ensure_peer_executable_matches_current_by_pid_opt;
 pub(crate) use ipc_auth::log_rejected_windows_ipc_connection;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use ipc_auth::{active_uid, authorize_service_scoped_ipc_connection};
-#[cfg(target_os = "macos")]
-use ipc_auth::authorize_user_server_process;
 #[cfg(windows)]
 use ipc_auth::{
     authorize_windows_main_ipc_connection, portable_service_listener_security_attributes,
@@ -526,7 +526,10 @@ pub enum Data {
     // (drmtap_open_render failed, e.g. no /dev/dri/renderD* access). The service then streams the
     // CPU-converted `DrmFrame` path for this connection instead of a dma-buf fd the consumer cannot
     // detile, so a render-node-less seat still captures instead of losing the stream.
-    DrmStart { display: i32, need_cpu: bool },
+    DrmStart {
+        display: i32,
+        need_cpu: bool,
+    },
     /// Service -> client: the enumerated DRM displays (sent once, before frames).
     #[cfg(all(target_os = "linux", feature = "drm"))]
     DrmDisplayList(Vec<DrmDisplayInfo>),
@@ -1473,9 +1476,7 @@ pub async fn connect_for_uid(
     let path = Config::ipc_path_for_uid(uid, postfix);
     let conn = connect_with_path(ms_timeout, &path).await?;
     #[cfg(target_os = "macos")]
-    if postfix.is_empty()
-        && !authorize_user_server_process(conn.peer_uid(), conn.peer_pid(), uid)
-    {
+    if postfix.is_empty() && !authorize_user_server_process(conn.peer_uid(), conn.peer_pid(), uid) {
         bail!("Rejected user IPC peer for uid {}", uid);
     }
     Ok(conn)
@@ -2351,8 +2352,7 @@ mod test {
     fn a_drm_cursor_without_provenance_keeps_the_hotspot_the_producer_sent() {
         // `Data` is adjacently tagged (`tag = "t", content = "c"`), so this is the real shape on
         // the socket, not a simplified one.
-        let legacy =
-            r#"{"t":"DrmCursor","c":{"id":7,"width":24,"height":24,"hotx":12,"hoty":11}}"#;
+        let legacy = r#"{"t":"DrmCursor","c":{"id":7,"width":24,"height":24,"hotx":12,"hoty":11}}"#;
         let msg: Data = serde_json::from_str(legacy).expect("legacy DrmCursor must deserialize");
         match msg {
             Data::DrmCursor {
@@ -2413,7 +2413,11 @@ mod test {
             cursor_pos: None,
         };
         let mut value = serde_json::to_value(&desc).unwrap();
-        assert!(value.as_object_mut().unwrap().remove("plane_rotation").is_some());
+        assert!(value
+            .as_object_mut()
+            .unwrap()
+            .remove("plane_rotation")
+            .is_some());
         let legacy: DmabufDesc =
             serde_json::from_value(value).expect("legacy DmabufDesc must deserialize");
         assert_eq!(legacy.plane_rotation, None);

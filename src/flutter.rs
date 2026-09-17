@@ -3,6 +3,7 @@ use crate::{
     flutter_ffi::{EventToUI, SessionID},
     ui_session_interface::{io_loop, InvokeUiSession, Session},
 };
+use base::message_proto::*;
 use flutter_rust_bridge::StreamSink;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use hbb_common::dlopen::{
@@ -10,10 +11,9 @@ use hbb_common::dlopen::{
     Error as LibError,
 };
 use hbb_common::{
-    anyhow::anyhow, bail, config::LocalConfig, get_version_number, log,
-    rendezvous_proto::ConnType, ResultType,
+    anyhow::anyhow, bail, config::LocalConfig, get_version_number, log, rendezvous_proto::ConnType,
+    ResultType,
 };
-use base::message_proto::*;
 use serde::Serialize;
 use serde_json::json;
 #[cfg(target_os = "windows")]
@@ -111,7 +111,10 @@ pub extern "C" fn rustdesk_core_main() -> bool {
 
         // Native runners bypass Rust's startup, which normally ignores SIGPIPE.
         if unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) } == libc::SIG_ERR {
-            eprintln!("Failed to ignore SIGPIPE: {}", std::io::Error::last_os_error());
+            eprintln!(
+                "Failed to ignore SIGPIPE: {}",
+                std::io::Error::last_os_error()
+            );
             std::process::exit(1);
         }
     }
@@ -681,7 +684,8 @@ impl InvokeUiSession for FlutterHandler {
     }
 
     /// unused in flutter, use switch_display or set_peer_info
-    fn set_display(&self, _x: i32, _y: i32, _w: i32, _h: i32, _cursor_embedded: bool, _scale: f64) {}
+    fn set_display(&self, _x: i32, _y: i32, _w: i32, _h: i32, _cursor_embedded: bool, _scale: f64) {
+    }
 
     fn update_privacy_mode(&self) {
         self.push_event::<&str>("update_privacy_mode", &[], &[]);

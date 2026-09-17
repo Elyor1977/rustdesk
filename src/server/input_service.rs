@@ -2858,10 +2858,17 @@ mod peer_abs_sample_tests {
             forget_sample_and_move(lock, |_| {})
         });
         asking.recv().unwrap();
-        assert!(last_peer_abs_sample().is_some(), "nothing forgotten before the lock");
+        assert!(
+            last_peer_abs_sample().is_some(),
+            "nothing forgotten before the lock"
+        );
         note_peer_absolute_move(50, 50);
         drop(peer);
         mover.join().unwrap();
-        assert_eq!(last_peer_abs_sample(), None, "the move of this process came last");
+        assert_eq!(
+            last_peer_abs_sample(),
+            None,
+            "the move of this process came last"
+        );
     }
 }
