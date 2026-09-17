@@ -32,7 +32,7 @@ RUN apt update -y && \
         ninja-build && \
         rm -rf /var/lib/apt/lists/*
 
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.30.6/cmake-3.30.6.tar.gz --no-check-certificate && \
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.30.6/cmake-3.30.6.tar.gz && \
     tar xzf cmake-3.30.6.tar.gz && \
     cd cmake-3.30.6 && \
     ./configure  --prefix=/usr/local && \
@@ -46,11 +46,12 @@ RUN git clone --branch 2023.04.15 --depth=1 https://github.com/microsoft/vcpkg &
 RUN groupadd -r user && \
     useradd -r -g user user --home /home/user && \
     mkdir -p /home/user/rustdesk && \
-    chown -R user: /home/user && \
-    echo "user ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/user
+    chown -R user: /home/user
 
 WORKDIR /home/user
-RUN curl -LO https://raw.githubusercontent.com/c-smile/sciter-sdk/master/bin.lnx/x64/libsciter-gtk.so
+# TODO: pin to a specific sciter-sdk commit (and verify sha256sum) instead of master,
+# same as .github/workflows/flutter-build.yml which also fetches from master.
+RUN curl -fLO https://raw.githubusercontent.com/c-smile/sciter-sdk/master/bin.lnx/x64/libsciter-gtk.so
 
 USER user
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh && \
