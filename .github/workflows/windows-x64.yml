@@ -175,6 +175,19 @@ jobs:
             sleep $((attempt * 15))
           done
 
+      - name: Prepare legacy Windows import library
+        if: inputs.windows-7
+        run: |
+          cargo fetch --locked --target x86_64-pc-windows-msvc --target x86_64-win7-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "Windows import library download failed" }
+          python3 -m unittest discover -s .github/scripts -p test_windows7_import_lib.py
+          if ($LASTEXITCODE -ne 0) { throw "Windows import library regression tests failed" }
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+          $importLibrary = python3 .github/scripts/windows7-import-lib.py $cargoHome
+          if ($LASTEXITCODE -ne 0) { throw "Legacy Windows import library is missing" }
+          $rustFlags = @('-Ctarget-feature=+crt-static', '--cfg', 'windows_slim_errors', "-Lnative=$importLibrary")
+          "CARGO_ENCODED_RUSTFLAGS=$($rustFlags -join [char]0x1f)" >> $env:GITHUB_ENV
+
       - name: Build Rust library for Windows 7
         if: inputs.windows-7
         run: |

@@ -29,6 +29,11 @@ Windows/Android release; it does not automatically start a legacy build.
   from `windows-result`; HRESULT error codes remain available.
   The old capture build helper maps the Win7 triple to its known x64 MSVC
   entry solely for its pointer-width check.
+  Older windows-rs bindings also use an unversioned `windows.lib`; their
+  target tables predate Win7. The Win7 job fetches the locked PC-target
+  dependencies and adds the 0.42.2 import-library directory to the Win7 Rust
+  linker search paths, preserving static CRT and slim-error flags, without
+  changing dependencies or modifying Cargo's source cache.
 - Flutter stays at 3.24.5 and uses the existing SHA-256-checked RustDesk engine.
   The runner/plugins and vcpkg libraries are compiled with a Windows 7 baseline.
 - Import checks cover the application EXE/DLL files, portable EXE, and MSI
