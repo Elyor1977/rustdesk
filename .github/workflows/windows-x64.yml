@@ -199,6 +199,16 @@ jobs:
           Copy-Item -LiteralPath ./target/x86_64-win7-windows-msvc/release/librustdesk.dll -Destination ./target/release/librustdesk.dll
           "RUSTDESK_WINDOWS7=1" >> $env:GITHUB_ENV
 
+      - name: Check Windows 7 Rust library before Flutter packaging
+        if: inputs.windows-7
+        run: |
+          python3 -m pip install --disable-pip-version-check pefile==2024.8.26
+          if ($LASTEXITCODE -ne 0) { throw "PE checker installation failed" }
+          python3 -m unittest discover -s .github/scripts -p test_check_windows7.py
+          if ($LASTEXITCODE -ne 0) { throw "Windows 7 compatibility regression tests failed" }
+          python3 .github/scripts/check-windows7.py ./target/release/librustdesk.dll
+          if ($LASTEXITCODE -ne 0) { throw "Windows 7 Rust library compatibility check failed" }
+
       - name: Build rustdesk
         run: |
           $compatArgs = @()
@@ -363,3 +373,17 @@ jobs:
         with:
           name: rustdesk-${{ env.WINDOWS_ARTIFACT_PLATFORM }}-x86_64-unsigned-installers
           path: Output
+
+      - name: Upload Windows 7 binaries for failure diagnosis
+        if: ${{ failure() && inputs.windows-7 }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows7-failed-build-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            target/release/librustdesk.dll
+            rustdesk/**/*.dll
+            rustdesk/**/*.exe
+            Output/*.exe
+            res/msi/**/CustomActions.dll

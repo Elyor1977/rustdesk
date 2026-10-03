@@ -37,6 +37,13 @@ class Windows7CompatibilityTests(unittest.TestCase):
         self.assertIn("unsupported DLL: bcryptprimitives.dll", errors)
         self.assertIn("subsystem version 10.1 requires a newer Windows", errors)
 
+    def test_reported_winrt_activation_imports_are_rejected(self):
+        for dll, api in (("ole32.dll", "CoIncrementMTAUsage"),
+                         ("api-ms-win-core-winrt-l1-1-0.dll", "RoGetActivationFactory")):
+            with self.subTest(api=api):
+                self.assertIn(f"unsupported API: {dll}!{api}",
+                              checker.compatibility_errors(binary(dll, [api])))
+
 
 if __name__ == "__main__":
     unittest.main()

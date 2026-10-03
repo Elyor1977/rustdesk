@@ -44,6 +44,13 @@ Windows/Android release; it does not automatically start a legacy build.
 - Privacy Mode 2/IDD virtual displays and the bundled printer driver require
   newer Windows. Their drivers and helper DLLs are omitted from the Win7
   package. Existing OS capability checks remain responsible for availability.
+- WinRT toast notifications require Windows 8+. The Win7 target excludes
+  the notification dependency and logs installation/update results instead.
+  The installation/update operations themselves are unchanged.
+- The Rust DLL import check runs before Flutter packaging; the complete
+  application, portable launcher, and MSI custom action checks still run.
+  Failed Win7 runs retain available binaries for seven days in the
+  `windows7-failed-build-diagnostics` artifact; these are not release installers.
 
 ## Validation limits
 
@@ -69,5 +76,7 @@ Upstream references:
   subsystem version for the runner and plugins.
 - `libs/scrap/build.rs`: Win7-only target mapping for the legacy build helper.
 - `build.rs`: Win7-only C++ library name avoids a collision with windows-rs.
+- `Cargo.toml` and `src/core_main.rs`: exclude WinRT toast notifications on
+  Win7; ordinary Windows notification behavior stays unchanged.
 - `libs/portable/generate.py`: opt-in metadata-only mode allows a separate
   `build-std` invocation for the launcher; its default build path is unchanged.

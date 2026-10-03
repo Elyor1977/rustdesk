@@ -152,6 +152,8 @@ virtual_display = { path = "libs/virtual_display" }
 remote_printer = { path = "libs/remote_printer" }
 impersonate_system = { git = "https://github.com/rustdesk-org/impersonate-system", rev = "2f429010a5a10b1fe5eceb553c6672fd53d20167" }
 shared_memory = "0.12"
+
+[target.'cfg(all(target_os = "windows", not(target_vendor = "win7")))'.dependencies]
 tauri-winrt-notification = { git = "https://github.com/tauri-apps/winrt-notification", rev = "09a4135a871c6ead29832dca5698948fb30bf94b" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
