@@ -183,9 +183,9 @@ jobs:
           python3 -m unittest discover -s .github/scripts -p test_windows7_import_lib.py
           if ($LASTEXITCODE -ne 0) { throw "Windows import library regression tests failed" }
           $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
-          $importLibrary = python3 .github/scripts/windows7-import-lib.py $cargoHome
+          $importLibraries = @(python3 .github/scripts/windows7-import-lib.py $cargoHome)
           if ($LASTEXITCODE -ne 0) { throw "Legacy Windows import library is missing" }
-          $rustFlags = @('-Ctarget-feature=+crt-static', '--cfg', 'windows_slim_errors', "-Lnative=$importLibrary")
+          $rustFlags = @('-Ctarget-feature=+crt-static', '--cfg', 'windows_slim_errors') + @($importLibraries | ForEach-Object { "-Lnative=$_" })
           "CARGO_ENCODED_RUSTFLAGS=$($rustFlags -join [char]0x1f)" >> $env:GITHUB_ENV
 
       - name: Build Rust library for Windows 7

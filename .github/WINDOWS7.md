@@ -31,9 +31,11 @@ Windows/Android release; it does not automatically start a legacy build.
   entry solely for its pointer-width check.
   Older windows-rs bindings also use an unversioned `windows.lib`; their
   target tables predate Win7. The Win7 job fetches the locked PC-target
-  dependencies and adds the 0.42.2 import-library directory to the Win7 Rust
+  dependencies and adds the 0.42.2 and 0.48.5 import-library directories to the Win7 Rust
   linker search paths, preserving static CRT and slim-error flags, without
   changing dependencies or modifying Cargo's source cache.
+  RustDesk's own C++ library uses a distinct name on Win7 to avoid shadowing
+  the legacy `windows.lib` import library.
 - Flutter stays at 3.24.5 and uses the existing SHA-256-checked RustDesk engine.
   The runner/plugins and vcpkg libraries are compiled with a Windows 7 baseline.
 - Import checks cover the application EXE/DLL files, portable EXE, and MSI
@@ -66,5 +68,6 @@ Upstream references:
 - `flutter/windows/CMakeLists.txt`: Win7-only compiler definitions and minimum
   subsystem version for the runner and plugins.
 - `libs/scrap/build.rs`: Win7-only target mapping for the legacy build helper.
+- `build.rs`: Win7-only C++ library name avoids a collision with windows-rs.
 - `libs/portable/generate.py`: opt-in metadata-only mode allows a separate
   `build-std` invocation for the launcher; its default build path is unchanged.

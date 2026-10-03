@@ -2,7 +2,13 @@
 fn build_windows() {
     let file = "src/platform/windows.cc";
     let file2 = "src/platform/windows_delete_test_cert.cc";
-    cc::Build::new().file(file).file(file2).compile("windows");
+    // Keep the Win7 import library named windows.lib separate from our C++ code.
+    let library = if std::env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("win7") {
+        "rustdesk_windows"
+    } else {
+        "windows"
+    };
+    cc::Build::new().file(file).file(file2).compile(library);
     println!("cargo:rustc-link-lib=WtsApi32");
     println!("cargo:rerun-if-changed={}", file);
     println!("cargo:rerun-if-changed={}", file2);
