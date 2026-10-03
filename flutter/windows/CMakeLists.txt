@@ -44,6 +44,11 @@ endforeach()
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+if("$ENV{RUSTDESK_WINDOWS7}" STREQUAL "1")
+  add_definitions(-D_WIN32_WINNT=0x0601 -DWINVER=0x0601)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS,6.01")
+endif()
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by

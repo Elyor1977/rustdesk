@@ -6,6 +6,9 @@ on:
       release:
         type: boolean
         default: false
+      windows-7:
+        type: boolean
+        default: false
     secrets:
       WINDOWS_CERTIFICATE_BASE64:
         required: false
@@ -51,7 +54,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-x64-${{ github.ref }}
+  group: ${{ inputs.windows-7 && 'windows7-x64' || 'windows-x64' }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
@@ -65,12 +68,15 @@ jobs:
       target: windows-2022
       configuration: Release
       platform: x64
-      target_version: Windows10
+      target_version: ${{ inputs.windows-7 && 'Windows7' || 'Windows10' }}
 
   build-windows-x64:
-    name: x86_64-pc-windows-msvc
+    name: ${{ inputs.windows-7 && 'x86_64-win7-windows-msvc' || 'x86_64-pc-windows-msvc' }}
     needs: [build-RustDeskTempTopMostWindow, generate-bridge]
     runs-on: windows-2022
+    env:
+      WINDOWS_ARTIFACT_PLATFORM: ${{ inputs.windows-7 && 'windows7' || 'windows' }}
+      WINDOWS_FILE_SUFFIX: ${{ inputs.windows-7 && '-windows7' || '' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
@@ -129,13 +135,13 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          toolchain: ${{ inputs.windows-7 && 'nightly-2025-06-25' || env.RUST_VERSION }}
           targets: x86_64-pc-windows-msvc
-          components: "rustfmt"
+          components: ${{ inputs.windows-7 && 'rustfmt,rust-src' || 'rustfmt' }}
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          prefix-key: windows-2022
+          prefix-key: ${{ inputs.windows-7 && 'windows-2022-win7' || 'windows-2022' }}
 
       - name: Install CMake required by vcpkg
         run: |
@@ -154,8 +160,12 @@ jobs:
           VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
         shell: bash
         run: |
+          win7_args=()
+          if [[ '${{ inputs.windows-7 }}' == 'true' ]]; then
+            win7_args+=(--overlay-triplets="$GITHUB_WORKSPACE/.github/win7-triplets")
+          fi
           for attempt in 1 2 3; do
-            if "$VCPKG_ROOT/vcpkg" install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"; then
+            if "$VCPKG_ROOT/vcpkg" install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed" "${win7_args[@]}"; then
               break
             fi
             if [ "$attempt" -eq 3 ]; then
@@ -165,9 +175,23 @@ jobs:
             sleep $((attempt * 15))
           done
 
+      - name: Build Rust library for Windows 7
+        if: inputs.windows-7
+        run: |
+          $features = python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram --print-features
+          if ($LASTEXITCODE -ne 0 -or -not $features) { throw "Windows feature list is missing" }
+          cargo build --locked --release --lib --features $features --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort
+          if ($LASTEXITCODE -ne 0) { throw "Windows 7 Rust build failed" }
+          New-Item -ItemType Directory -Path ./target/release -Force | Out-Null
+          Copy-Item -LiteralPath ./target/x86_64-win7-windows-msvc/release/librustdesk.dll -Destination ./target/release/librustdesk.dll
+          "RUSTDESK_WINDOWS7=1" >> $env:GITHUB_ENV
+
       - name: Build rustdesk
         run: |
-          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          $compatArgs = @()
+          if ('${{ inputs.windows-7 }}' -eq 'true') { $compatArgs += '--skip-cargo' }
+          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram @compatArgs
+          if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
@@ -187,6 +211,17 @@ jobs:
           Expand-Archive printer_driver_adapter.zip -DestinationPath .
           mv -Force .\printer_driver_adapter.dll ./rustdesk
 
+      - name: Remove drivers unsupported on Windows 7
+        if: inputs.windows-7
+        run: |
+          Remove-Item -LiteralPath ./rustdesk/dylib_virtual_display.dll, ./rustdesk/printer_driver_adapter.dll
+          $appRoot = (Resolve-Path ./rustdesk).Path
+          foreach ($name in @('usbmmidd_v2', 'drivers')) {
+            $driverPath = (Resolve-Path (Join-Path $appRoot $name)).Path
+            if (-not $driverPath.StartsWith($appRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "Driver path is outside application folder" }
+            Remove-Item -LiteralPath $driverPath -Recurse
+          }
+
       - name: find Runner.res
         shell: bash
         run: |
@@ -199,6 +234,16 @@ jobs:
         with:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
+
+      - name: Check Windows 7 application imports
+        if: inputs.windows-7
+        run: |
+          python3 -m pip install --disable-pip-version-check pefile==2024.8.26
+          if ($LASTEXITCODE -ne 0) { throw "PE checker installation failed" }
+          python3 -m unittest discover -s .github/scripts -p test_check_windows7.py
+          if ($LASTEXITCODE -ne 0) { throw "Windows 7 compatibility regression tests failed" }
+          python3 .github/scripts/check-windows7.py ./rustdesk
+          if ($LASTEXITCODE -ne 0) { throw "Windows 7 application compatibility check failed" }
 
       - name: Validate signing configuration
         if: inputs.release
@@ -221,7 +266,7 @@ jobs:
         if: inputs.release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rustdesk-windows-x86_64-folder
+          name: rustdesk-${{ env.WINDOWS_ARTIFACT_PLATFORM }}-x86_64-folder
           path: rustdesk
 
       - name: Build self-extracted executable
@@ -230,10 +275,25 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          if [[ '${{ inputs.windows-7 }}' == 'true' ]]; then
+            python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe --skip-build
+            cargo build --locked --release --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort
+          else
+            python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          fi
           popd
           mkdir -p ./Output
-          mv ./target/release/rustdesk-portable-packer.exe ./Output/rustdesk-${{ steps.version.outputs.value }}-x86_64.exe
+          if [[ '${{ inputs.windows-7 }}' == 'true' ]]; then
+            mv ./target/x86_64-win7-windows-msvc/release/rustdesk-portable-packer.exe ./Output/rustdesk-${{ steps.version.outputs.value }}${{ env.WINDOWS_FILE_SUFFIX }}-x86_64.exe
+          else
+            mv ./target/release/rustdesk-portable-packer.exe ./Output/rustdesk-${{ steps.version.outputs.value }}-x86_64.exe
+          fi
+
+      - name: Check Windows 7 portable executable imports
+        if: inputs.windows-7
+        run: |
+          python3 .github/scripts/check-windows7.py ./Output
+          if ($LASTEXITCODE -ne 0) { throw "Windows 7 portable compatibility check failed" }
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -243,10 +303,19 @@ jobs:
           pushd ./res/msi
           python preprocess.py --arp -d ../../rustdesk
           nuget restore msi.sln
-          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
+          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=${{ inputs.windows-7 && 'Windows7' || 'Windows10' }}
+          if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
           if (-not $msi) { throw "MSI output is missing" }
-          mv $msi.FullName ../../Output/rustdesk-${{ steps.version.outputs.value }}-x86_64.msi
+          mv $msi.FullName ../../Output/rustdesk-${{ steps.version.outputs.value }}${{ env.WINDOWS_FILE_SUFFIX }}-x86_64.msi
+
+      - name: Check Windows 7 MSI custom action imports
+        if: inputs.windows-7
+        run: |
+          $actions = @(Get-ChildItem -LiteralPath ./res/msi -Filter CustomActions.dll -File -Recurse)
+          if ($actions.Count -ne 1) { throw "Expected one MSI custom action DLL" }
+          python3 .github/scripts/check-windows7.py $actions[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw "Windows 7 MSI compatibility check failed" }
 
       - name: Sign installers
         if: inputs.release
@@ -272,12 +341,12 @@ jobs:
         if: inputs.release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rustdesk-windows-x86_64-installers
+          name: rustdesk-${{ env.WINDOWS_ARTIFACT_PLATFORM }}-x86_64-installers
           path: Output
 
       - name: Upload unsigned installers
         if: ${{ !inputs.release }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rustdesk-windows-x86_64-unsigned-installers
+          name: rustdesk-${{ env.WINDOWS_ARTIFACT_PLATFORM }}-x86_64-unsigned-installers
           path: Output
