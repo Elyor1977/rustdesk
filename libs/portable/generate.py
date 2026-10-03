@@ -109,6 +109,8 @@ if __name__ == '__main__':
                       help="specify startup file in --folder, default is rustdesk.exe")
     parser.add_option("-t", "--target", dest="target",
                       help="the target used by cargo")
+    parser.add_option("--skip-build", action="store_true", default=False,
+                      help="generate metadata only; build the packer separately")
     parser.add_option("-l", "--level", dest="level", type="int",
                       help="compression level, default is 11, highest", default=11)
     parser.add_option("--package", dest="package",
@@ -152,4 +154,5 @@ if __name__ == '__main__':
     else:
         write_package_metadata(md5_table, output_folder, exe)
         write_app_metadata(output_folder)
-        build_portable(output_folder, options.target)
+        if not options.skip_build:
+            build_portable(output_folder, options.target)

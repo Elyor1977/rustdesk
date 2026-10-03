@@ -237,7 +237,12 @@ fn main() {
     // run "rustup show" to show current default toolchain, if it is stable-x86-pc-windows-msvc,
     // please install x64 toolchain by "rustup toolchain install stable-x86_64-pc-windows-msvc",
     // then set x64 to default by "rustup default stable-x86_64-pc-windows-msvc"
-    let target = target_build_utils::TargetInfo::new();
+    // This legacy helper predates the Win7 triple; its pointer width is identical.
+    let target = if env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("win7") {
+        target_build_utils::TargetInfo::from_str("x86_64-pc-windows-msvc")
+    } else {
+        target_build_utils::TargetInfo::new()
+    };
     if target.unwrap().target_pointer_width() != "64" {
         // panic!("Only support 64bit system");
     }
