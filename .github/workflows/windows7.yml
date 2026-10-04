@@ -1,0 +1,13 @@
+name: Windows 7 unsigned
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/windows-x64.yml
+    with:
+      windows-7: true

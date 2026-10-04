@@ -1,0 +1,32 @@
+name: Windows signed
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows-7:
+        description: Build for Windows 7 SP1 x64
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-signed-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    name: Approve Windows signing
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - run: echo "Windows signed build approved"
+
+  build:
+    needs: approve
+    uses: ./.github/workflows/windows-x64.yml
+    with:
+      release: true
+      windows-7: ${{ inputs.windows-7 }}
+    secrets: inherit

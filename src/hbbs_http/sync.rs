@@ -6,12 +6,12 @@ use std::{
 
 #[cfg(not(any(target_os = "ios")))]
 use crate::{common::API_LOG_INTERVAL, ui_interface::get_builtin_option, Connection};
+use base::config::keys;
 use hbb_common::{
     config::{self, Config, LocalConfig},
     log,
     tokio::{self, sync::broadcast, time::Instant},
 };
-use base::config::keys;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -425,10 +425,7 @@ mod tests {
         let verifier = switch_code_verifier(switch_code);
         assert_ne!(verifier, switch_code);
         assert_eq!(verifier, switch_code_verifier(switch_code));
-        assert_eq!(
-            verifier,
-            "dMIn3uiPe77XodFB5IKi7PrKJ7l7+zVquNn0ObSaHQc="
-        );
+        assert_eq!(verifier, "dMIn3uiPe77XodFB5IKi7PrKJ7l7+zVquNn0ObSaHQc=");
     }
 
     #[test]

@@ -25,9 +25,9 @@ pub enum ParseError {
     ///         ^
     UnmatchedClose,
 }
-impl Error for ParseError {
-    fn description(&self) -> &str {
-        match *self {
+impl ParseError {
+    fn message(&self) -> &'static str {
+        match self {
             ParseError::UnknownTag(_) => "Unknown tag",
             ParseError::UnexpectedOpen => "Unescaped open bracket ({) found inside tag name",
             ParseError::UnmatchedOpen => "Unmatched open bracket ({). No matching close (})",
@@ -35,9 +35,14 @@ impl Error for ParseError {
         }
     }
 }
+impl Error for ParseError {
+    fn description(&self) -> &str {
+        self.message()
+    }
+}
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_string())
+        f.write_str(self.message())
     }
 }
 
@@ -179,6 +184,14 @@ mod tests {
         assert_eq!(
             tokenize("{+CTRL}{{this}} is going to fail}"),
             Err(ParseError::UnmatchedClose)
+        );
+    }
+
+    #[test]
+    fn display_error() {
+        assert_eq!(
+            ParseError::UnknownTag("TEST".into()).to_string(),
+            "Unknown tag"
         );
     }
 }

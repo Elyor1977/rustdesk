@@ -353,9 +353,8 @@ fn refresh_wayland_uinput_rect_if_changed() {
         #[cfg(not(feature = "drm"))]
         let generation = 0;
         let live_changed = layout.edge(&live_rects, snapshot_missing, generation);
-        let drifted = !layout.baseline.is_empty()
-            && !live_rects.is_empty()
-            && layout.baseline != live_rects;
+        let drifted =
+            !layout.baseline.is_empty() && !live_rects.is_empty() && layout.baseline != live_rects;
         layout.observe(&live_rects);
         (live_changed, drifted)
     };
@@ -1057,7 +1056,11 @@ mod input_map_tests {
         let before = input_map_epoch();
         note_input_map_unknown();
         assert_eq!(input_map_gen(), u64::MAX, "no generation is ready");
-        assert_eq!(input_map_epoch(), before + 1, "samples from before do not count");
+        assert_eq!(
+            input_map_epoch(),
+            before + 1,
+            "samples from before do not count"
+        );
         assert_eq!(wayland_uinput_rect(), None, "the poll applies again");
     }
 
@@ -1125,7 +1128,10 @@ mod input_map_tests {
     fn a_uinput_apply_thread_that_died_is_started_again() {
         let _worker = WORKER.lock().unwrap_or_else(|p| p.into_inner());
         let died = run_uinput_apply(|_| panic!("the apply thread dies here"));
-        assert!(died.blocking_recv().is_err(), "the job that killed it has no answer");
+        assert!(
+            died.blocking_recv().is_err(),
+            "the job that killed it has no answer"
+        );
         // A job asked while the dying thread still unwinds is lost with it; a later one runs.
         let answered = (0..50).find_map(|_| {
             let answer = run_uinput_apply(|_| 7).blocking_recv().ok();
@@ -1228,7 +1234,10 @@ mod wayland_layout_tests {
         let mut l = WaylandLayout::default();
         l.observe(&upright);
         l.note_capturer(&rotated, 0);
-        assert!(l.edge(&rotated, false, 0), "the poll's memory still says upright");
+        assert!(
+            l.edge(&rotated, false, 0),
+            "the poll's memory still says upright"
+        );
     }
 
     // The constructor's snapshot read and its `note_capturer` are two steps, and the poll can
@@ -1243,10 +1252,16 @@ mod wayland_layout_tests {
         let rotated = layout(1080, 1920, 1);
         let mut l = WaylandLayout::default();
         l.reset_baseline(Vec::new());
-        assert!(!l.edge(&rotated, false, 0), "nothing recorded and the snapshot is present");
+        assert!(
+            !l.edge(&rotated, false, 0),
+            "nothing recorded and the snapshot is present"
+        );
         l.observe(&rotated);
         l.note_capturer(&upright, 0);
-        assert!(l.edge(&rotated, false, 0), "the capturer is built on upright, live is rotated");
+        assert!(
+            l.edge(&rotated, false, 0),
+            "the capturer is built on upright, live is rotated"
+        );
 
         // The promotion consumes it: the next poll sees the same layout and stays quiet.
         l.observe(&rotated);
@@ -1286,7 +1301,10 @@ mod wayland_layout_tests {
         l.observe(&rotated);
         l.note_capturer(&upright, 7);
         l.reset_baseline(rotated.clone());
-        assert!(!l.edge(&rotated, false, 8), "the capturer built at 7 rebuilds on its own");
+        assert!(
+            !l.edge(&rotated, false, 8),
+            "the capturer built at 7 rebuilds on its own"
+        );
 
         // Control: a disagreeing record AT the promoted generation is a real edge.
         l.observe(&rotated);

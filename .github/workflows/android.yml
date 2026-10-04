@@ -1,0 +1,274 @@
+name: Android unsigned
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        type: string
+        default: all
+      release:
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_SIGNING_KEY:
+        required: false
+      ANDROID_ALIAS:
+        required: false
+      ANDROID_KEY_STORE_PASSWORD:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      ANDROID_CERT_SHA256:
+        required: false
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture"
+        type: choice
+        default: aarch64
+        options: [aarch64, armv7, x86_64, all]
+  pull_request:
+    paths:
+      - ".github/workflows/android.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "src/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/android.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.py"
+      - "flutter/**"
+      - "libs/**"
+      - "src/**"
+
+env:
+  RUST_VERSION: "1.88" # time 0.3.47 requires Rust 1.88
+  CARGO_NDK_VERSION: "3.1.2"
+  ANDROID_FLUTTER_VERSION: "3.24.5"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  NDK_VERSION: "r28c"
+  SELECTED_ARCH: ${{ inputs.arch || 'aarch64' }}
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}-${{ inputs.arch || 'aarch64' }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-android:
+    needs: [generate-bridge]
+    name: android ${{ matrix.job.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - { arch: aarch64, target: aarch64-linux-android,   abi: arm64-v8a,   platform: android-arm64, ndk: ndk_arm64.sh, sysroot: aarch64-linux-android }
+          - { arch: armv7,   target: armv7-linux-androideabi, abi: armeabi-v7a, platform: android-arm,   ndk: ndk_arm.sh,   sysroot: arm-linux-androideabi }
+          - { arch: x86_64,  target: x86_64-linux-android,    abi: x86_64,      platform: android-x64,   ndk: ndk_x64.sh,   sysroot: x86_64-linux-android }
+    steps:
+      - name: Skip unselected arch
+        if: ${{ env.SELECTED_ARCH != 'all' && env.SELECTED_ARCH != matrix.job.arch }}
+        run: echo "skip=1" >> $GITHUB_ENV
+
+      - name: Free Disk Space (Ubuntu)
+        if: env.skip != '1'
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Export GitHub Actions cache environment variables
+        if: env.skip != '1'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install dependencies
+        if: env.skip != '1'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake curl gcc-multilib git g++ g++-multilib \
+            libayatana-appindicator3-dev libasound2-dev libc6-dev libclang-dev libunwind-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgtk-3-dev libpulse-dev libva-dev \
+            libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxdo-dev libxfixes-dev \
+            llvm-dev nasm ninja-build openjdk-17-jdk-headless pkg-config tree wget
+
+      - name: Checkout source code
+        if: env.skip != '1'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+
+      - name: Read project version
+        if: env.skip != '1'
+        id: version
+        run: |
+          version=$(python3 ./build.py --print-version)
+          test -n "$version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install flutter
+        if: env.skip != '1'
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.ANDROID_FLUTTER_VERSION }}
+
+      - name: Patch flutter
+        if: env.skip != '1'
+        run: |
+          cd $(dirname $(dirname $(which flutter)))
+          git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
+        if: env.skip != '1'
+        id: setup-ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: true
+
+      - name: Setup vcpkg with Github Actions binary cache
+        if: env.skip != '1'
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        if: env.skip != '1'
+        shell: bash
+        run: |
+          if ! ./flutter/build_android_deps.sh "${{ matrix.job.abi }}"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do echo "$_1:"; cat "$_1"; echo; done
+            exit 1
+          fi
+
+      - name: Restore bridge files
+        if: env.skip != '1'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install Rust toolchain
+        if: env.skip != '1'
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: env.skip != '1'
+        with:
+          prefix-key: rustdesk-lib-cache-android
+          key: ${{ matrix.job.target }}
+
+      - name: Build rustdesk lib
+        if: env.skip != '1'
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          rustup target add ${{ matrix.job.target }}
+          cargo install cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} --locked
+          ./flutter/${{ matrix.job.ndk }}
+          mkdir -p ./flutter/android/app/src/main/jniLibs/${{ matrix.job.abi }}
+          cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/${{ matrix.job.abi }}/librustdesk.so
+
+      - name: Build apk
+        if: env.skip != '1'
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          ANDROID_ALIAS: ${{ secrets.ANDROID_ALIAS }}
+          ANDROID_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
+          if [ '${{ inputs.release }}' = 'true' ]; then
+            test -n "$ANDROID_SIGNING_KEY" || { echo "ANDROID_SIGNING_KEY is required"; exit 1; }
+            test -n "$ANDROID_ALIAS" || { echo "ANDROID_ALIAS is required"; exit 1; }
+            test -n "$ANDROID_KEY_STORE_PASSWORD" || { echo "ANDROID_KEY_STORE_PASSWORD is required"; exit 1; }
+            test -n "$ANDROID_KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD is required"; exit 1; }
+            test -n "$ANDROID_CERT_SHA256" || { echo "ANDROID_CERT_SHA256 is required"; exit 1; }
+            printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > ./flutter/android/app/release.jks
+            keytool -list -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" >/dev/null
+            expected=$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+            expected=${expected#SHA256}
+            expected=${expected#SHA-256}
+            [[ "$expected" =~ ^[0-9A-F]{64}$ ]] || { echo "::error::ANDROID_CERT_SHA256 must contain a SHA-256 certificate fingerprint"; exit 1; }
+            actual=$(keytool -exportcert -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" | sha256sum | awk '{print toupper($1)}')
+            [ "$actual" = "$expected" ] || { echo "::error::ANDROID_CERT_SHA256 does not match the keystore certificate. Set it to: $actual"; exit 1; }
+            printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release.jks\n' "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_ALIAS" > ./flutter/android/key.properties
+          fi
+          cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ matrix.job.sysroot }}/libc++_shared.so ./flutter/android/app/src/main/jniLibs/${{ matrix.job.abi }}/
+          pushd flutter
+          flutter build apk --release --build-name "${{ steps.version.outputs.value }}" --target-platform ${{ matrix.job.platform }} --split-per-abi
+          popd
+          mkdir -p apk
+          mv flutter/build/app/outputs/flutter-apk/app-${{ matrix.job.abi }}-release.apk apk/rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}.apk
+
+      - name: Verify APK signature
+        if: env.skip != '1' && inputs.release
+        shell: bash
+        env:
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -x "$apksigner"
+          apk=$(find apk -maxdepth 1 -type f -name '*.apk' -print -quit)
+          test -n "$apk"
+          "$apksigner" verify --verbose "$apk"
+          certs=$("$apksigner" verify --print-certs "$apk")
+          actual=$(printf '%s\n' "$certs" | sed -nE 's/^.*certificate SHA-256 digest:[[:space:]]*([0-9A-Fa-f:]+).*$/\1/p' | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')
+          if [[ ! "$actual" =~ ^[0-9A-F]{64}$ ]]; then
+            actual=$(keytool -printcert -rfc -jarfile "$apk" 2>/dev/null | openssl x509 -outform DER 2>/dev/null | sha256sum | awk '{print toupper($1)}')
+          fi
+          expected=$(printf '%s' "$ANDROID_CERT_SHA256" | sed -E 's/^[[:space:]]*SHA-?256[[:space:]]*:[[:space:]]*//I' | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+          [[ "$actual" =~ ^[0-9A-F]{64}$ ]] || { echo "::error::Unable to read the APK signing certificate fingerprint"; exit 1; }
+          [[ "$expected" =~ ^[0-9A-F]{64}$ ]] || { echo "::error::ANDROID_CERT_SHA256 must contain a 64-digit SHA-256 fingerprint"; exit 1; }
+          [ "$actual" = "$expected" ] || { echo "::error::APK certificate fingerprint does not match ANDROID_CERT_SHA256"; exit 1; }
+
+      - name: Upload signed apk
+        if: env.skip != '1' && inputs.release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}-apk
+          path: apk
+
+      - name: Upload unsigned apk
+        if: ${{ env.skip != '1' && !inputs.release }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-${{ steps.version.outputs.value }}-${{ matrix.job.arch }}-unsigned-apk
+          path: apk
+
+      - name: Remove Android signing material
+        if: always() && env.skip != '1' && inputs.release
+        shell: bash
+        run: rm -f ./flutter/android/app/release.jks ./flutter/android/key.properties

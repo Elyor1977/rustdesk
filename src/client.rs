@@ -10,7 +10,7 @@ use cpal::{
 use crossbeam_queue::ArrayQueue;
 use magnum_opus::{Channels::*, Decoder as AudioDecoder};
 #[cfg(not(target_os = "linux"))]
-use ringbuf::{ring_buffer::RbBase, Rb};
+use ringbuf::traits::{Consumer, Observer, RingBuffer};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -37,6 +37,11 @@ use crate::{
 };
 #[cfg(feature = "unix-file-copy-paste")]
 use crate::{clipboard::check_clipboard_files, clipboard_file::unix_file_clip};
+use base::{
+    config::keys,
+    fs::JobType,
+    message_proto::{option_message::BoolOption, *},
+};
 pub use file_trait::FileManager;
 #[cfg(not(feature = "flutter"))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -46,8 +51,8 @@ use hbb_common::{
     anyhow::{anyhow, Context},
     bail,
     config::{
-        self, use_ws, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution,
-        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS,
+        self, use_ws, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution, CONNECT_TIMEOUT,
+        READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS,
     },
     futures::future::{select_ok, BoxFuture, FutureExt},
     get_version_number, log,
@@ -69,11 +74,6 @@ use hbb_common::{
     },
     webrtc::WebRTCStream,
     AddrMangle, ResultType, Stream,
-};
-use base::{
-    config::keys,
-    fs::JobType,
-    message_proto::{option_message::BoolOption, *},
 };
 pub use helper::*;
 use scrap::{
@@ -121,11 +121,9 @@ pub const LOGIN_SCREEN_WAYLAND: &str = "Wayland login screen is not supported";
 #[cfg(target_os = "linux")]
 pub const SCRAP_UBUNTU_HIGHER_REQUIRED: &str = "ubuntu-21-04-required";
 #[cfg(target_os = "linux")]
-pub const SCRAP_OTHER_VERSION_OR_X11_REQUIRED: &str =
-    "wayland-requires-higher-linux-version";
+pub const SCRAP_OTHER_VERSION_OR_X11_REQUIRED: &str = "wayland-requires-higher-linux-version";
 #[cfg(target_os = "linux")]
-pub const SCRAP_XDP_PORTAL_UNAVAILABLE: &str =
-    "xdp-portal-unavailable";
+pub const SCRAP_XDP_PORTAL_UNAVAILABLE: &str = "xdp-portal-unavailable";
 pub const SCRAP_X11_REQUIRED: &str = "x11 expected";
 pub const SCRAP_X11_REF_URL: &str = "https://rustdesk.com/docs/en/manual/linux/#x11-required";
 
@@ -980,9 +978,7 @@ impl Client {
                 if remaining.is_zero() {
                     break;
                 }
-                let timeout_ms = remaining
-                    .as_millis()
-                    .clamp(1, u64::MAX as u128) as u64;
+                let timeout_ms = remaining.as_millis().clamp(1, u64::MAX as u128) as u64;
                 let Some(msg_in) =
                     crate::get_next_nonkeyexchange_msg(&mut socket, Some(timeout_ms)).await
                 else {
@@ -1575,7 +1571,10 @@ impl Client {
                 // WebRTC won the race but identity/DTLS binding failed; fall back to a freshly
                 // coordinated relay instead of failing the whole attempt. The guard is dropped
                 // first so the bad pc is closed promptly.
-                log::warn!("WebRTC secure handshake failed ({}), falling back to relay", e);
+                log::warn!(
+                    "WebRTC secure handshake failed ({}), falling back to relay",
+                    e
+                );
                 drop(webrtc_guard.take());
                 match Self::request_relay(
                     peer_id,
@@ -1701,9 +1700,10 @@ impl Client {
                                 // requiring the peer to have SIGNED that fingerprint defeats a
                                 // rendezvous/relay MITM that swaps SDPs. Fail closed.
                                 if is_webrtc {
-                                    let actual_fp = conn.dtls_fingerprint(false).await.ok_or_else(
-                                        || anyhow!("WebRTC DTLS fingerprint unavailable"),
-                                    )?;
+                                    let actual_fp =
+                                        conn.dtls_fingerprint(false).await.ok_or_else(|| {
+                                            anyhow!("WebRTC DTLS fingerprint unavailable")
+                                        })?;
                                     if !dtls_fingerprint_bound(&signed_fp, &actual_fp) {
                                         bail!("WebRTC DTLS fingerprint not bound to peer identity (possible MITM)");
                                     }
@@ -2058,7 +2058,9 @@ impl ClientClipboardHandler {
         if CLIPBOARD_STATE.lock().unwrap().running {
             #[cfg(feature = "unix-file-copy-paste")]
             if self.is_file_required() {
-                if let Some(urls) = check_clipboard_files(&mut self.ctx, ClipboardSide::Client, false) {
+                if let Some(urls) =
+                    check_clipboard_files(&mut self.ctx, ClipboardSide::Client, false)
+                {
                     if !urls.is_empty() {
                         #[cfg(target_os = "macos")]
                         if crate::clipboard::is_file_url_set_by_rustdesk(&urls) {
@@ -2219,7 +2221,7 @@ impl Default for AudioBuffer {
 impl AudioBuffer {
     pub fn resize(&mut self, sample_rate: usize, channels: usize) {
         let capacity = sample_rate * channels * AUDIO_BUFFER_MS / 1000;
-        let old_capacity = self.0.lock().unwrap().capacity();
+        let old_capacity = self.0.lock().unwrap().capacity().get();
         if capacity != old_capacity {
             *self.0.lock().unwrap() = ringbuf::HeapRb::<f32>::new(capacity);
             self.1 = sample_rate * channels;
@@ -2237,18 +2239,17 @@ impl AudioBuffer {
         }
         self.2[i] += 1;
 
-        #[allow(non_upper_case_globals)]
-        static mut tms: i64 = 0;
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static TMS: AtomicI64 = AtomicI64::new(0);
         let dt = Local::now().timestamp_millis();
-        unsafe {
-            if tms == 0 {
-                tms = dt;
-                return;
-            } else if dt < tms + 12000 {
-                return;
-            }
-            tms = dt;
+        let tms = TMS.load(Ordering::Relaxed);
+        if tms == 0 {
+            TMS.store(dt, Ordering::Relaxed);
+            return;
+        } else if dt < tms + 12000 {
+            return;
         }
+        TMS.store(dt, Ordering::Relaxed);
 
         // the safer water mark to drop
         let mut zero = 0;
@@ -2280,7 +2281,7 @@ impl AudioBuffer {
         }
 
         let mut lock = self.0.lock().unwrap();
-        let cap = lock.capacity();
+        let cap = lock.capacity().get();
         let having = lock.occupied_len();
         let skip = (cap * max / (30 * N) + 1) & (!1);
         if (having > skip * 3) && (skip > 0) {
@@ -2303,7 +2304,7 @@ impl AudioBuffer {
     /// will be kept.
     fn append_pcm2(&self, buffer: &[f32]) -> usize {
         let mut lock = self.0.lock().unwrap();
-        let cap = lock.capacity();
+        let cap = lock.capacity().get();
         let having = lock.occupied_len() + buffer.len();
         lock.push_slice_overwrite(buffer);
         let discard = (having > cap).then(|| (having - cap, self.signal_discontinuity()));
@@ -2331,6 +2332,7 @@ impl AudioBuffer {
 #[cfg(all(test, not(target_os = "linux")))]
 mod audio_buffer_discontinuity_tests {
     use super::AudioBuffer;
+    use ringbuf::traits::Consumer;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -2360,6 +2362,15 @@ mod audio_buffer_discontinuity_tests {
         assert_eq!(audio_buffer.3.load(Ordering::Relaxed), 1);
         assert_eq!(audio_buffer.append_pcm2(&OVERSIZED_INPUT), BUFFER_CAPACITY);
         assert_eq!(audio_buffer.3.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            audio_buffer
+                .0
+                .lock()
+                .unwrap()
+                .pop_iter()
+                .collect::<Vec<_>>(),
+            OVERSIZED_INPUT[OVERSIZED_INPUT.len() - BUFFER_CAPACITY..]
+        );
     }
 }
 
@@ -2417,7 +2428,9 @@ impl AudioHandler {
 
         self.sample_rate = (format0.sample_rate, config.sample_rate.0);
         let audio_resampler = create_audio_resampler(
-            format0.sample_rate, config.sample_rate.0, format0.channels as _,
+            format0.sample_rate,
+            config.sample_rate.0,
+            format0.channels as _,
         )?;
         let mut build_output_stream = |config: StreamConfig| match sample_format {
             cpal::SampleFormat::I8 => self.build_output_stream::<i8>(&config, &device),
@@ -3804,16 +3817,15 @@ impl LoginConfigHandler {
         };
         let mut avatar = get_builtin_option(keys::OPTION_AVATAR);
         if avatar.is_empty() {
-            avatar = serde_json::from_str::<serde_json::Value>(&LocalConfig::get_option(
-                "user_info",
-            ))
-            .ok()
-            .and_then(|x| {
-                x.get("avatar")
-                    .and_then(|x| x.as_str())
-                    .map(|x| x.trim().to_owned())
-            })
-            .unwrap_or_default();
+            avatar =
+                serde_json::from_str::<serde_json::Value>(&LocalConfig::get_option("user_info"))
+                    .ok()
+                    .and_then(|x| {
+                        x.get("avatar")
+                            .and_then(|x| x.as_str())
+                            .map(|x| x.trim().to_owned())
+                    })
+                    .unwrap_or_default();
         }
         avatar = resolve_avatar_url(avatar);
         let mut display_name = get_builtin_option(keys::OPTION_DISPLAY_NAME);
@@ -4561,12 +4573,7 @@ async fn is_switch_sides_back(conn_type: ConnType, interface: &impl Interface) -
         };
         (lc.id.clone(), uuid)
     };
-    if !request_local_switch_sides_uuid(
-        &id,
-        &uuid,
-        crate::ipc::SwitchSidesUuidAction::Check,
-    )
-    .await
+    if !request_local_switch_sides_uuid(&id, &uuid, crate::ipc::SwitchSidesUuidAction::Check).await
     {
         return false;
     }
@@ -4579,7 +4586,10 @@ async fn is_switch_sides_back(conn_type: ConnType, interface: &impl Interface) -
     lc.id == id && current_uuid.as_ref() == Some(&uuid)
 }
 
-#[cfg(not(all(feature = "flutter", not(any(target_os = "android", target_os = "ios")))))]
+#[cfg(not(all(
+    feature = "flutter",
+    not(any(target_os = "android", target_os = "ios"))
+)))]
 async fn is_switch_sides_back(_conn_type: ConnType, _interface: &impl Interface) -> bool {
     false
 }
@@ -4613,9 +4623,7 @@ async fn request_local_switch_sides_uuid(
             returned_id,
             returned_action,
             Some(true),
-        ))) => {
-            returned_uuid == uuid && returned_id == id && returned_action == action
-        }
+        ))) => returned_uuid == uuid && returned_id == id && returned_action == action,
         _ => false,
     }
 }
@@ -4668,9 +4676,7 @@ pub async fn handle_hash(
         if config::is_incoming_only() {
             interface.msgbox("error", "Connection Error", "Incoming only mode", "");
             let mut misc = Misc::new();
-            misc.set_close_reason(
-                "Connection not allowed in incoming-only mode".to_owned(),
-            );
+            misc.set_close_reason("Connection not allowed in incoming-only mode".to_owned());
             let mut msg = Message::new();
             msg.set_misc(misc);
             allow_err!(peer.send(&msg).await);
@@ -4939,7 +4945,12 @@ pub trait Interface: Send + Clone + 'static + Sized {
             log::info!("Restart remote device, suppress connection error: {err}");
             // Flutter treats this as a reconnect control event. The text is kept
             // for legacy UI and existing translation reuse.
-            self.msgbox("restarting", "Restarting remote device", "Connection in progress. Please wait.", "");
+            self.msgbox(
+                "restarting",
+                "Restarting remote device",
+                "Connection in progress. Please wait.",
+                "",
+            );
             return;
         }
 
@@ -5388,7 +5399,9 @@ pub mod peer_online {
                         for i in 0..ids.len() {
                             // bytes index from left to right
                             let bit_value = 0x01 << (7 - i % 8);
-                            if (states[i / 8] & bit_value) == bit_value {
+                            // A short/malformed response means no state for this id: treat as offline.
+                            let byte = states.get(i / 8).copied().unwrap_or(0);
+                            if (byte & bit_value) == bit_value {
                                 onlines.push(ids[i].clone());
                             } else {
                                 offlines.push(ids[i].clone());
@@ -5825,7 +5838,11 @@ mod webrtc_race_tests {
         .await
         .unwrap_err()
         .to_string();
-        assert!(err.contains("webrtc dead") && err.contains("relay dead"), "{}", err);
+        assert!(
+            err.contains("webrtc dead") && err.contains("relay dead"),
+            "{}",
+            err
+        );
     }
 }
 
@@ -5870,7 +5887,7 @@ mod kx_tests {
         advertised: u32,
         run: Option<u32>,
         rs_sk: sign::SecretKey,
-    ) -> (String, Vec<u8>, oneshot::Receiver<Seen>) {
+    ) -> (SocketAddr, Vec<u8>, oneshot::Receiver<Seen>) {
         let (sign_pk, sign_sk) = sign::gen_keypair();
         let id_pk = |pk: &[u8], kx_version| {
             IdPk {
@@ -5886,7 +5903,7 @@ mod kx_tests {
         let listener = hbb_common::tcp::new_listener("127.0.0.1:0", false)
             .await
             .unwrap();
-        let host = listener.local_addr().unwrap().to_string();
+        let host = listener.local_addr().unwrap();
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
             let (stream, addr) = listener.accept().await.unwrap();
@@ -5933,7 +5950,8 @@ mod kx_tests {
     async fn handshake(advertised: u32, run: Option<u32>) -> (Seen, bool) {
         let (rs_pk, rs_sk) = sign::gen_keypair();
         let (host, signed_id_pk, seen) = controlled_stub(advertised, run, rs_sk).await;
-        let mut conn = connect_tcp(host, 3000).await.unwrap();
+        let stream = tokio::net::TcpStream::connect(host).await.unwrap();
+        let mut conn = Stream::from(stream, host);
         let pk =
             Client::secure_connection(PEER_ID, signed_id_pk, &crate::encode64(rs_pk.0), &mut conn)
                 .await

@@ -2,7 +2,13 @@
 fn build_windows() {
     let file = "src/platform/windows.cc";
     let file2 = "src/platform/windows_delete_test_cert.cc";
-    cc::Build::new().file(file).file(file2).compile("windows");
+    // Keep the Win7 import library named windows.lib separate from our C++ code.
+    let library = if std::env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("win7") {
+        "rustdesk_windows"
+    } else {
+        "windows"
+    };
+    cc::Build::new().file(file).file(file2).compile(library);
     println!("cargo:rustc-link-lib=WtsApi32");
     println!("cargo:rerun-if-changed={}", file);
     println!("cargo:rerun-if-changed={}", file2);
@@ -12,11 +18,16 @@ fn build_windows() {
 fn build_mac() {
     let file = "src/platform/macos.mm";
     let mut b = cc::Build::new();
-    if let Ok(os_version::OsVersion::MacOS(v)) = os_version::detect() {
-        let v = v.version;
-        if v.contains("10.14") {
-            b.flag("-DNO_InputMonitoringAuthStatus=1");
-        }
+    let is_mojave = std::process::Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|version| version.contains("10.14"))
+        .unwrap_or(false);
+    if is_mojave {
+        b.flag("-DNO_InputMonitoringAuthStatus=1");
     }
     b.flag("-std=c++17").file(file).compile("macos");
     println!("cargo:rerun-if-changed={}", file);

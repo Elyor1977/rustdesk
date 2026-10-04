@@ -100,10 +100,12 @@ pub mod client {
             allow_err!(self.send(Data::Keyboard(DataKeyboard::Sequence(sequence.to_string()))));
         }
 
-        // TODO: handle error???
         fn key_down(&mut self, key: Key) -> enigo::ResultType {
-            allow_err!(self.send(Data::Keyboard(DataKeyboard::KeyDown(key))));
-            Ok(())
+            self.send(Data::Keyboard(DataKeyboard::KeyDown(key)))
+                .map_err(|e| {
+                    log::error!("uinput key_down failed: {}", e);
+                    e.into()
+                })
         }
         fn key_up(&mut self, key: Key) {
             allow_err!(self.send(Data::Keyboard(DataKeyboard::KeyUp(key))));
@@ -134,11 +136,18 @@ pub mod client {
                 .block_on(self.conn.send(&Data::Mouse(DataMouse::Refresh)))?;
             // Wait for the service to confirm it recreated the device, so a
             // failed refresh is distinguishable from a good one.
-            match self.rt.block_on(self.conn.next_timeout(IPC_REQUEST_TIMEOUT)) {
+            match self
+                .rt
+                .block_on(self.conn.next_timeout(IPC_REQUEST_TIMEOUT))
+            {
                 Ok(Some(Data::Empty)) => Ok(()),
                 Ok(Some(resp)) => bail!("unexpected uinput mouse refresh response: {:?}", &resp),
                 Ok(None) => bail!("uinput mouse refresh failed, connection closed"),
-                Err(e) => bail!("uinput mouse refresh timeout {}, {}", IPC_REQUEST_TIMEOUT, e),
+                Err(e) => bail!(
+                    "uinput mouse refresh timeout {}, {}",
+                    IPC_REQUEST_TIMEOUT,
+                    e
+                ),
             }
         }
     }
@@ -158,10 +167,12 @@ pub mod client {
         fn mouse_move_relative(&mut self, x: i32, y: i32) {
             allow_err!(self.send(Data::Mouse(DataMouse::MoveRelative(x, y))));
         }
-        // TODO: handle error???
         fn mouse_down(&mut self, button: MouseButton) -> enigo::ResultType {
-            allow_err!(self.send(Data::Mouse(DataMouse::Down(button))));
-            Ok(())
+            self.send(Data::Mouse(DataMouse::Down(button)))
+                .map_err(|e| {
+                    log::error!("uinput mouse_down failed: {}", e);
+                    e.into()
+                })
         }
         fn mouse_up(&mut self, button: MouseButton) {
             allow_err!(self.send(Data::Mouse(DataMouse::Up(button))));

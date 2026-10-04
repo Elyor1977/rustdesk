@@ -323,8 +323,7 @@ pub struct DrmDevice {
 /// field libdrmtap failed to terminate cannot read past it.
 fn cstr_field(buf: &[std::os::raw::c_char]) -> String {
     // SAFETY: c_char and u8 share size/alignment; the slice is the exact length of `buf`.
-    let bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, buf.len()) };
+    let bytes: &[u8] = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, buf.len()) };
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
@@ -400,7 +399,9 @@ impl DrmReader {
             }
         };
         let cfg = drmtap_config {
-            device_path: device_cstr.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            device_path: device_cstr
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
             crtc_id,
             helper_path: std::ptr::null(),
             debug: 0,
@@ -605,12 +606,19 @@ impl DrmReader {
                 ));
             }
             // No fourcc gate here: the converter handles every format libdrmtap supports, and gating here dropped convertible scanouts such as XR30.
-            let planes = if desc.num_planes == 0 { 1 } else { desc.num_planes };
+            let planes = if desc.num_planes == 0 {
+                1
+            } else {
+                desc.num_planes
+            };
             if planes > 4 {
                 (self.lib.frame_release)(self.ctx, &mut frame);
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("DRM scanout num_planes {} out of range (1..=4)", desc.num_planes),
+                    format!(
+                        "DRM scanout num_planes {} out of range (1..=4)",
+                        desc.num_planes
+                    ),
                 ));
             }
             for p in 0..(planes as usize) {
@@ -812,9 +820,18 @@ mod hotspot_provenance_tests {
             "same pixels, same (0, 0), different meaning: the producer must not dedupe this away"
         );
         // And the pre-existing parts still count, so this did not trade one blind spot for another.
-        assert_ne!(cursor_id(0xabc, 24, 24, 0, 0, true), cursor_id(0xabc, 32, 24, 0, 0, true));
-        assert_ne!(cursor_id(0xabc, 24, 24, 0, 0, true), cursor_id(0xabc, 24, 24, 1, 0, true));
-        assert_ne!(cursor_id(0xabc, 24, 24, 0, 0, true), cursor_id(0xdef, 24, 24, 0, 0, true));
+        assert_ne!(
+            cursor_id(0xabc, 24, 24, 0, 0, true),
+            cursor_id(0xabc, 32, 24, 0, 0, true)
+        );
+        assert_ne!(
+            cursor_id(0xabc, 24, 24, 0, 0, true),
+            cursor_id(0xabc, 24, 24, 1, 0, true)
+        );
+        assert_ne!(
+            cursor_id(0xabc, 24, 24, 0, 0, true),
+            cursor_id(0xdef, 24, 24, 0, 0, true)
+        );
     }
 
     /// The case the whole entry point exists for, and the one the old heuristic got backwards: a
@@ -1037,7 +1054,10 @@ mod plane_rotation_tests {
     fn a_plane_without_the_property_turned_nothing() {
         assert_eq!(plane_rotation_answer(0, 0x4), Some(0x4));
         assert_eq!(plane_rotation_answer(0, 0x1), Some(0x1));
-        assert_eq!(plane_rotation_answer(-hbb_common::libc::ENOTSUP, 0), Some(0x1));
+        assert_eq!(
+            plane_rotation_answer(-hbb_common::libc::ENOTSUP, 0),
+            Some(0x1)
+        );
         assert_eq!(plane_rotation_answer(-hbb_common::libc::ENOENT, 0), None);
         assert_eq!(plane_rotation_answer(-hbb_common::libc::EINVAL, 0), None);
         assert_eq!(plane_rotation_answer(-hbb_common::libc::EIO, 7), None);

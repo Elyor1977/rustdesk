@@ -8,7 +8,7 @@ use base::config::keys;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use base::platform::register_breakdown_handler;
 use hbb_common::{config, log};
-#[cfg(windows)]
+#[cfg(all(windows, not(target_vendor = "win7")))]
 use tauri_winrt_notification::{Duration, Sound, Toast};
 
 #[macro_export]
@@ -245,6 +245,9 @@ pub fn core_main() -> Option<Vec<String>> {
                         }
                     },
                 };
+                #[cfg(target_vendor = "win7")]
+                log::info!("Update result: {}", translate(text));
+                #[cfg(not(target_vendor = "win7"))]
                 Toast::new(Toast::POWERSHELL_APP_ID)
                     .title(&config::APP_NAME.read().unwrap())
                     .text1(&translate(text))
@@ -277,6 +280,9 @@ pub fn core_main() -> Option<Vec<String>> {
                         translate("Installation failed!".to_string())
                     }
                 };
+                #[cfg(target_vendor = "win7")]
+                log::info!("Installation result: {}", text);
+                #[cfg(not(target_vendor = "win7"))]
                 Toast::new(Toast::POWERSHELL_APP_ID)
                     .title(&config::APP_NAME.read().unwrap())
                     .text1(&text)
@@ -499,7 +505,7 @@ pub fn core_main() -> Option<Vec<String>> {
             }
             return None;
         } else if args[0] == "--config" {
-            if args.len() == 2 && !args[0].contains("host=") {
+            if args.len() == 2 && !args[1].contains("host=") {
                 if crate::platform::is_installed() && is_root() {
                     // encrypted string used in renaming exe.
                     let name = if args[1].ends_with(".exe") {
