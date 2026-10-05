@@ -21,6 +21,20 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_flutter_build_accepts_read_only_callers(self):
+        config = workflow("flutter-build")
+        self.assertNotIn("permissions", config)
+        for name, job in config["jobs"].items():
+            with self.subTest(job=name):
+                self.assertNotEqual(job.get("permissions", {}).get("contents"),
+                                    "write")
+        self.assertEqual(workflow("flutter-ci")["permissions"]["contents"], "read")
+        self.assertEqual(workflow("flutter-nightly")["permissions"]["contents"],
+                         "write")
+        for event in ("push", "pull_request"):
+            self.assertIn(".github/workflows/flutter-build.yml",
+                          workflow("flutter-ci")["on"][event]["paths"])
+
     def test_signing_has_separate_noncancelling_concurrency(self):
         for name in ("windows-x64", "android"):
             with self.subTest(workflow=name):

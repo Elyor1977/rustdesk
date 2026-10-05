@@ -13,6 +13,7 @@ on:
       - "src/flutter_ffi.rs"
       - "src/flutter.rs"
       - ".github/workflows/flutter-ci.yml"
+      - ".github/workflows/flutter-build.yml"
       - ".github/workflows/bridge.yml"
       - ".github/patches/**"
   push:
@@ -22,6 +23,7 @@ on:
       - "src/flutter_ffi.rs"
       - "src/flutter.rs"
       - ".github/workflows/flutter-ci.yml"
+      - ".github/workflows/flutter-build.yml"
       - ".github/workflows/bridge.yml"
       - ".github/patches/**"
 
