@@ -3,10 +3,10 @@
 // https://github.com/rust-av/vpx-rs/blob/master/src/decoder.rs
 // https://github.com/chromium/chromium/blob/e7b24573bc2e06fed4749dd6b6abfce67f29052f/media/video/vpx_video_encoder.cc#L522
 
+use base::message_proto::{Chroma, EncodedVideoFrame, EncodedVideoFrames, VideoFrame};
 use hbb_common::anyhow::{anyhow, Context};
 use hbb_common::log;
 use hbb_common::ResultType;
-use base::message_proto::{Chroma, EncodedVideoFrame, EncodedVideoFrames, VideoFrame};
 
 use crate::codec::{base_bitrate, codec_thread_num, EncoderApi};
 use crate::{EncodeInput, EncodeYuvFormat, GoogleImage, Pixfmt, STRIDE_ALIGN};
