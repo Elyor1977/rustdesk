@@ -17,7 +17,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    uses: ./.github/workflows/release-checks.yml
+
   approve:
+    needs: checks
     name: Approve Android signing
     runs-on: ubuntu-24.04
     environment: release

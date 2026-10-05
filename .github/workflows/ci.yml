@@ -10,6 +10,11 @@ env:
   PROJECT_NAME: "rustdesk"
 
 on:
+  workflow_call:
+    inputs:
+      check-context:
+        type: string
+        default: ""
   workflow_dispatch:
   pull_request:
     paths-ignore:
@@ -29,8 +34,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  group: ci-${{ github.workflow }}-${{ inputs.check-context }}-${{ github.ref }}
+  cancel-in-progress: ${{ inputs.check-context == '' && (github.event_name == 'push' || github.event_name == 'pull_request') && github.ref_type != 'tag' }}
 
 jobs:
   ensure_cargo_fmt:
@@ -87,6 +92,12 @@ jobs:
       run: |
         cargo install cargo-audit --version 0.22.0 --locked
         cargo audit
+
+    - name: Test CI contracts and Windows 7 compatibility checks
+      run: |
+        python3 -m pip install pefile==2024.8.26 PyYAML==6.0.3
+        python3 .github/scripts/test_ci_contract.py
+        python3 -m unittest discover -s .github/scripts -p 'test_*windows7*.py'
 
   # min_version:
   #   name: Minimum supported rust version
