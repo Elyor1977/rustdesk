@@ -21,13 +21,16 @@ use winapi::{
         winuser::{
             ChangeDisplaySettingsExW, EnumDisplayDevicesW, EnumDisplaySettingsExW,
             EnumDisplaySettingsW, CDS_NORESET, CDS_RESET, CDS_SET_PRIMARY, CDS_UPDATEREGISTRY,
-            DISP_CHANGE_FAILED, DISP_CHANGE_SUCCESSFUL, EDD_GET_DEVICE_INTERFACE_NAME,
-            ENUM_CURRENT_SETTINGS, ENUM_REGISTRY_SETTINGS,
+            DISP_CHANGE_SUCCESSFUL, EDD_GET_DEVICE_INTERFACE_NAME, ENUM_CURRENT_SETTINGS,
+            ENUM_REGISTRY_SETTINGS,
         },
     },
 };
 
 pub(super) const PRIVACY_MODE_IMPL: &str = super::PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY;
+
+#[path = "display_settings_error.rs"]
+mod display_settings_error;
 
 const CONFIG_KEY_REG_RECOVERY: &str = "reg_recovery";
 
@@ -92,8 +95,7 @@ impl PrivacyModeImpl {
 
         let mut i: DWORD = 0;
         loop {
-            #[allow(invalid_value)]
-            let mut dd: DISPLAY_DEVICEW = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+            let mut dd: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
             dd.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as _;
             let ok = unsafe { EnumDisplayDevicesW(std::ptr::null(), i, &mut dd as _, 0) };
             if ok == FALSE {
@@ -105,8 +107,7 @@ impl PrivacyModeImpl {
             {
                 continue;
             }
-            #[allow(invalid_value)]
-            let mut dm: DEVMODEW = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+            let mut dm: DEVMODEW = unsafe { std::mem::zeroed() };
             dm.dmSize = std::mem::size_of::<DEVMODEW>() as _;
             dm.dmDriverExtra = 0;
             unsafe {
@@ -160,15 +161,7 @@ impl PrivacyModeImpl {
 
     #[inline]
     fn change_display_settings_ex_err_msg(rc: i32) -> String {
-        if rc != DISP_CHANGE_FAILED {
-            format!("ret: {}", rc)
-        } else {
-            format!(
-                "ret: {}, last error: {:?}",
-                rc,
-                std::io::Error::last_os_error()
-            )
-        }
+        display_settings_error::describe(rc)
     }
 
     fn set_primary_display(&mut self) -> ResultType<String> {
@@ -176,8 +169,7 @@ impl PrivacyModeImpl {
         let display = &self.virtual_displays[0];
         let display_name = std::string::String::from_utf16(&display.name)?;
 
-        #[allow(invalid_value)]
-        let mut new_primary_dm: DEVMODEW = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        let mut new_primary_dm: DEVMODEW = unsafe { std::mem::zeroed() };
         new_primary_dm.dmSize = std::mem::size_of::<DEVMODEW>() as _;
         new_primary_dm.dmDriverExtra = 0;
         unsafe {
@@ -221,8 +213,7 @@ impl PrivacyModeImpl {
 
             let mut i: DWORD = 0;
             loop {
-                #[allow(invalid_value)]
-                let mut dd: DISPLAY_DEVICEW = std::mem::MaybeUninit::uninit().assume_init();
+                let mut dd: DISPLAY_DEVICEW = std::mem::zeroed();
                 dd.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as _;
                 if FALSE
                     == EnumDisplayDevicesW(NULL as _, i, &mut dd, EDD_GET_DEVICE_INTERFACE_NAME)
@@ -238,8 +229,7 @@ impl PrivacyModeImpl {
                     continue;
                 }
 
-                #[allow(invalid_value)]
-                let mut dm: DEVMODEW = std::mem::MaybeUninit::uninit().assume_init();
+                let mut dm: DEVMODEW = std::mem::zeroed();
                 dm.dmSize = std::mem::size_of::<DEVMODEW>() as _;
                 dm.dmDriverExtra = 0;
                 if FALSE
