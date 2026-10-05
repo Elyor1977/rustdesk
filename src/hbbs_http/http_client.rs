@@ -73,7 +73,7 @@ pub fn create_http_client(
     tls_type: TlsType,
     danger_accept_invalid_cert: bool,
 ) -> ResultType<SyncClient> {
-    let builder = SyncClient::builder();
+    let builder = SyncClient::builder().connect_timeout(std::time::Duration::from_secs(12));
     configure_http_client!(
         builder,
         tls_type,
@@ -87,7 +87,7 @@ pub fn create_http_client_async(
     tls_type: TlsType,
     danger_accept_invalid_cert: bool,
 ) -> ResultType<AsyncClient> {
-    let builder = AsyncClient::builder();
+    let builder = AsyncClient::builder().connect_timeout(std::time::Duration::from_secs(12));
     configure_http_client!(
         builder,
         tls_type,
@@ -163,7 +163,11 @@ fn create_http_client_with_url_(
     if is_tls_type_cached && original_danger_accept_invalid_cert.is_some() {
         return Ok(client);
     }
-    if let Err(e) = client.head(url).send() {
+    if let Err(e) = client
+        .head(url)
+        .timeout(std::time::Duration::from_secs(12))
+        .send()
+    {
         if e.is_request() {
             match (tls_type, is_tls_type_cached, danger_accept_invalid_cert) {
                 (TlsType::Rustls, _, None) => {
@@ -302,7 +306,12 @@ async fn create_http_client_async_with_url_(
     if is_tls_type_cached && original_danger_accept_invalid_cert.is_some() {
         return Ok(client);
     }
-    if let Err(e) = client.head(url).send().await {
+    if let Err(e) = client
+        .head(url)
+        .timeout(std::time::Duration::from_secs(12))
+        .send()
+        .await
+    {
         match (tls_type, is_tls_type_cached, danger_accept_invalid_cert) {
             (TlsType::Rustls, _, None) => {
                 log::warn!(

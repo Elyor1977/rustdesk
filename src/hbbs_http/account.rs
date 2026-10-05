@@ -10,6 +10,10 @@ use std::{
 };
 use url::Url;
 
+#[cfg(test)]
+#[path = "account_tests.rs"]
+mod tests;
+
 lazy_static::lazy_static! {
     static ref OIDC_SESSION: Arc<RwLock<OidcSession>> = Arc::new(RwLock::new(OidcSession::new()));
 }
@@ -147,14 +151,13 @@ impl OidcSession {
     }
 
     fn ensure_client(api_server: &str) -> ResultType<()> {
-        let mut write_guard = OIDC_SESSION.write().unwrap();
-        if write_guard.warmed_api_server.as_deref() == Some(api_server) {
+        if OIDC_SESSION.read().unwrap().warmed_api_server.as_deref() == Some(api_server) {
             return Ok(());
         }
         // This URL is used to detect the appropriate TLS implementation for the server.
         let login_option_url = format!("{}/api/login-options", api_server);
         let _ = create_http_client_with_url(&login_option_url)?;
-        write_guard.warmed_api_server = Some(api_server.to_owned());
+        OIDC_SESSION.write().unwrap().warmed_api_server = Some(api_server.to_owned());
         Ok(())
     }
 
