@@ -27,6 +27,11 @@ class WorkflowContractTests(unittest.TestCase):
                 concurrency = workflow(name)["concurrency"]
                 self.assertIn("inputs.release", concurrency["group"])
                 self.assertIn("!inputs.release", concurrency["cancel-in-progress"])
+        steps = workflow("android")["jobs"]["build-android"]["steps"]
+        apk_step = next(step for step in steps if step.get("name") == "Build apk")
+        for name, value in apk_step["env"].items():
+            if name.startswith("ANDROID_") and "secrets." in value:
+                self.assertIn("inputs.release &&", value)
 
     def test_signing_requires_successful_checks_before_approval(self):
         for name in ("release", "windows-signed", "android-signed"):

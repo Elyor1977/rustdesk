@@ -204,11 +204,11 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
-          ANDROID_ALIAS: ${{ secrets.ANDROID_ALIAS }}
-          ANDROID_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+          ANDROID_SIGNING_KEY: ${{ inputs.release && secrets.ANDROID_SIGNING_KEY || '' }}
+          ANDROID_ALIAS: ${{ inputs.release && secrets.ANDROID_ALIAS || '' }}
+          ANDROID_KEY_STORE_PASSWORD: ${{ inputs.release && secrets.ANDROID_KEY_STORE_PASSWORD || '' }}
+          ANDROID_KEY_PASSWORD: ${{ inputs.release && secrets.ANDROID_KEY_PASSWORD || '' }}
+          ANDROID_CERT_SHA256: ${{ inputs.release && secrets.ANDROID_CERT_SHA256 || '' }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties

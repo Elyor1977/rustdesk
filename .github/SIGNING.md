@@ -56,6 +56,11 @@ Never replace or lose the Android keystore after publishing an application. Upda
 
 Create a GitHub Environment named `release` under **Settings → Environments** and require manual approval. Protect tags matching `v*` with a repository ruleset. A version tag waits for approval before any signing or publication starts.
 
+Rust CI/audit and Flutter analyze/tests run before the approval job. If these
+checks fail, signing does not start and there is no deployment to approve yet.
+The version tag is validated before the builds. After checks succeed, open the
+run, select **Review deployments → release → Approve and deploy**.
+
 ## Manual builds
 
 Run workflows independently under **Actions**:
@@ -66,3 +71,7 @@ Run workflows independently under **Actions**:
 - `All platforms unsigned` only when every unsigned platform is needed.
 
 Signed workflows wait for approval from the `release` environment. Unsigned workflows do not receive signing secrets and never publish a GitHub release.
+
+Manual signed builds also run the checks first. Windows, Windows 7 and Android
+use separate bridge artifacts; signed and unsigned runs have distinct
+concurrency groups, so one cannot cancel the other.
