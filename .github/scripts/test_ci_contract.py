@@ -21,6 +21,15 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_flutter_analysis_keeps_errors_and_warnings_fatal(self):
+        steps = workflow("flutter-ci")["jobs"]["flutter-analyze"]["steps"]
+        analyze = next(step for step in steps if step.get("name") == "flutter analyze")
+        self.assertEqual(analyze["run"], "flutter analyze --no-fatal-infos")
+        self.assertNotEqual(analyze.get("continue-on-error"), "true")
+        tests = next(step for step in steps if step.get("name") == "flutter test")
+        self.assertEqual(tests["run"], "flutter test")
+        self.assertNotEqual(tests.get("continue-on-error"), "true")
+
     def test_flutter_build_accepts_read_only_callers(self):
         config = workflow("flutter-build")
         self.assertNotIn("permissions", config)

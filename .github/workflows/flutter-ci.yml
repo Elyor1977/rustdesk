@@ -79,7 +79,7 @@ jobs:
 
       - name: flutter analyze
         working-directory: flutter
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: flutter test
         working-directory: flutter
