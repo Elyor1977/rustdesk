@@ -1,5 +1,7 @@
 # Upstream integration: 2026-09-28
 
+> Current history policy (2026-10-05): preserve the original dated fork commits and merge new upstream changes; do not squash or rewrite master routinely. The earlier aggregate snapshot is retained on `backup/master-before-audit-fixes-2026-10-05`. The instructions and SHAs below describe the historical September synchronization, not the current publication command. See `docs/AUDIT-FIXES-2026-10-05.md` for the current recovery and publication procedure.
+
 ## History
 
 - Previous fork master: `7078b346b7d0e1ce02ea5f2d1a462d25cfc6f815`.
