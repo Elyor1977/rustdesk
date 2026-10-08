@@ -36,6 +36,7 @@ const kUCKeyActionDisplay: u16 = 3;
 #[allow(non_upper_case_globals)]
 const kUCKeyTranslateDeadKeysBit: OptionBits = 1 << 31;
 const BUF_LEN: usize = 4;
+const KEYBOARD_ERROR_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 const MOUSE_EVENT_BUTTON_NUMBER_BACK: i64 = 3;
 const MOUSE_EVENT_BUTTON_NUMBER_FORWARD: i64 = 4;
@@ -234,10 +235,7 @@ impl MouseControllable for Enigo {
         // Use saturating_sub to prevent negative thresholds on very small displays
         let right = (display_width as i32).saturating_sub(margin);
         let bottom = (display_height as i32).saturating_sub(margin);
-        let near_edge = new_x < margin
-            || new_x > right
-            || new_y < margin
-            || new_y > bottom;
+        let near_edge = new_x < margin || new_x > right || new_y < margin || new_y > bottom;
 
         if near_edge {
             // Reset cursor to screen center to allow continuous movement
@@ -428,7 +426,19 @@ impl KeyboardControllable for Enigo {
                 if let Ok(event) = CGEvent::new_keyboard_event(src.clone(), 0, true) {
                     event.set_string(cluster);
                     self.post(event, None);
+                } else {
+                    hbb_common::throttled_log!(
+                        KEYBOARD_ERROR_LOG_INTERVAL,
+                        error,
+                        "Failed to inject macOS Enigo key-sequence: could not create keyboard event"
+                    );
                 }
+            } else {
+                hbb_common::throttled_log!(
+                    KEYBOARD_ERROR_LOG_INTERVAL,
+                    error,
+                    "Failed to inject macOS Enigo key-sequence: event source is not initialized"
+                );
             }
         }
     }
@@ -436,17 +446,40 @@ impl KeyboardControllable for Enigo {
     fn key_click(&mut self, key: Key) {
         let keycode = self.key_to_keycode(key);
         if keycode == u16::MAX {
+            hbb_common::throttled_log!(
+                KEYBOARD_ERROR_LOG_INTERVAL,
+                error,
+                "Failed to inject macOS Enigo key-click: keycode mapping is unavailable"
+            );
             return;
         }
 
         if let Some(src) = self.event_source.as_ref() {
             if let Ok(event) = CGEvent::new_keyboard_event(src.clone(), keycode, true) {
                 self.post(event, Some(keycode));
+            } else {
+                hbb_common::throttled_log!(
+                    KEYBOARD_ERROR_LOG_INTERVAL,
+                    error,
+                    "Failed to inject macOS Enigo key-down in key-click: could not create keyboard event"
+                );
             }
 
             if let Ok(event) = CGEvent::new_keyboard_event(src.clone(), keycode, false) {
                 self.post(event, Some(keycode));
+            } else {
+                hbb_common::throttled_log!(
+                    KEYBOARD_ERROR_LOG_INTERVAL,
+                    error,
+                    "Failed to inject macOS Enigo key-up in key-click: could not create keyboard event"
+                );
             }
+        } else {
+            hbb_common::throttled_log!(
+                KEYBOARD_ERROR_LOG_INTERVAL,
+                error,
+                "Failed to inject macOS Enigo key-click: event source is not initialized"
+            );
         }
     }
 
@@ -465,10 +498,29 @@ impl KeyboardControllable for Enigo {
 
     fn key_up(&mut self, key: Key) {
         let code = self.key_to_keycode(key);
+        if code == u16::MAX {
+            hbb_common::throttled_log!(
+                KEYBOARD_ERROR_LOG_INTERVAL,
+                error,
+                "Cannot map macOS Enigo key-up to a keycode"
+            );
+        }
         if let Some(src) = self.event_source.as_ref() {
             if let Ok(event) = CGEvent::new_keyboard_event(src.clone(), code, false) {
                 self.post(event, Some(code));
+            } else {
+                hbb_common::throttled_log!(
+                    KEYBOARD_ERROR_LOG_INTERVAL,
+                    error,
+                    "Failed to inject macOS Enigo key-up: could not create keyboard event"
+                );
             }
+        } else {
+            hbb_common::throttled_log!(
+                KEYBOARD_ERROR_LOG_INTERVAL,
+                error,
+                "Failed to inject macOS Enigo key-up: event source is not initialized"
+            );
         }
     }
 
@@ -510,9 +562,7 @@ impl Enigo {
 
         let dest = CGPoint::new(x as f64, y as f64);
         if let Some(src) = self.event_source.as_ref() {
-            if let Ok(event) =
-                CGEvent::new_mouse_event(src.clone(), event_type, dest, button)
-            {
+            if let Ok(event) = CGEvent::new_mouse_event(src.clone(), event_type, dest, button) {
                 // Set delta fields for relative mouse movement
                 // This is essential for Pointer Lock API in browsers
                 if let Some((dx, dy)) = delta {
