@@ -21,6 +21,17 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_android_signing_caller_does_not_lock_its_build(self):
+        caller = workflow("android-signed")["concurrency"]["group"]
+        build = workflow("android")["concurrency"]["group"]
+        build = build.replace("${{ inputs.release && 'signed' || 'unsigned' }}",
+                              "signed")
+        for arch in workflow("android-signed")["on"]["workflow_dispatch"]["inputs"]["arch"]["options"]:
+            with self.subTest(arch=arch):
+                self.assertNotEqual(
+                    caller.replace("${{ inputs.arch }}", arch).lower(),
+                    build.replace("${{ inputs.arch || 'aarch64' }}", arch).lower())
+
     def test_flutter_analysis_keeps_errors_and_warnings_fatal(self):
         steps = workflow("flutter-ci")["jobs"]["flutter-analyze"]["steps"]
         analyze = next(step for step in steps if step.get("name") == "flutter analyze")

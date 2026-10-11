@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-signed-${{ github.ref }}-${{ inputs.arch }}
+  group: android-signed-workflow-${{ github.ref }}-${{ inputs.arch }}
   cancel-in-progress: false
 
 jobs:
