@@ -59,7 +59,13 @@ skills; concise reporting uses caveman. No external AI review service is called.
 ## Verification and limits
 
 - Cargo 1.88.0 locked dependency metadata: Windows x64, Linux x64 and Android arm64 pass.
-- Rust 1.88.0 changed-file formatting: pass.
+- Correction after the reported rustfmt startup dialog: the first formatting
+  invocation was not a valid check. The standalone rustfmt could not locate
+  `rustc_driver-386698c5705dd10f.dll` in the separately extracted rustc directory.
+  Add that matching rustc `bin` directory to the process-local PATH, verify
+  `rustfmt --version` succeeds, then explicitly check the formatter exit code.
+  The real check found one line-wrap issue in the new DRM test; it is corrected.
+  Rechecking all 18 changed Rust files with Rust 1.88.0 passes.
 - Five CI contract tests and seven Windows 7 checker tests: pass.
 - Conflict-marker and whitespace checks: pass.
 - Flutter 3.24.5 analyzer (`--no-fatal-infos`): exit 0, no errors or warnings.

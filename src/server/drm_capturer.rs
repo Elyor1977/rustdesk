@@ -4157,7 +4157,11 @@ mod drm_capturer_tests {
     #[test]
     fn a_plane_transposed_scanout_is_delivered_at_the_advertised_size() {
         let d = plane_transposed_display("eDP-1", 800, 1280);
-        let session = rotated_dims(delivered_transform(&d, 0), d.width as usize, d.height as usize);
+        let session = rotated_dims(
+            delivered_transform(&d, 0),
+            d.width as usize,
+            d.height as usize,
+        );
         let mut c = capturer_named(Some(session), Some("test:plane-transposed-session"));
         put_frame_rot(&c, 1280, 800, Some(0x8));
         assert!(matches!(c.frame(Duration::from_millis(50)), Ok(_)));
