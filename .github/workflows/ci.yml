@@ -99,6 +99,11 @@ jobs:
         python3 .github/scripts/test_ci_contract.py
         python3 -m unittest discover -s .github/scripts -p 'test_*windows7*.py'
 
+    - name: Test signed update metadata tooling
+      run: |
+        python3 -m pip install --only-binary=:all: --require-hashes -r res/update/update_metadata_requirements.txt
+        python3 -m unittest discover -s res/update -p 'test_*.py'
+
   # min_version:
   #   name: Minimum supported rust version
   #   runs-on: ubuntu-20.04

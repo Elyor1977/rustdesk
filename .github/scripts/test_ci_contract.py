@@ -21,6 +21,16 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_fork_update_public_key_reaches_desktop_builds(self):
+        for name, value in (
+            ("windows-x64", "${{ !inputs.windows-7 && vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY || '' }}"),
+            ("flutter-build", "${{ vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY }}"),
+        ):
+            with self.subTest(workflow=name):
+                self.assertEqual(workflow(name)["env"].get(
+                    "RUSTDESK_UPDATE_ED25519_PUBLIC_KEY"),
+                    value)
+
     def test_android_signing_caller_does_not_lock_its_build(self):
         caller = workflow("android-signed")["concurrency"]["group"]
         build = workflow("android")["concurrency"]["group"]

@@ -29,6 +29,21 @@ jobs:
           version=$(python3 ./build.py --print-version)
           test "v$version" = "$GITHUB_REF_NAME"
 
+      - name: Refuse to replace a release with signed update metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          releases=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100")
+          release_id=$(jq -r --arg tag "$GITHUB_REF_NAME" '[.[][] | select(.tag_name == $tag)] | if length == 0 then "" elif length == 1 then .[0].id else error("multiple releases for tag") end' <<<"$releases")
+          if [ -n "$release_id" ]; then
+            assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100")
+            if jq -e 'any(.[][]; .name == "rustdesk-update.json" or .name == "rustdesk-update.json.sig")' <<<"$assets" >/dev/null; then
+              echo "::error::Signed update metadata already exists. Use a new release tag."
+              exit 1
+            fi
+          fi
+
   checks:
     needs: validate
     uses: ./.github/workflows/release-checks.yml
@@ -43,6 +58,17 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout source code
+        if: vars.ENABLE_SIGNED_UPDATE_METADATA == 'true'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Validate fork update signing key
+        if: vars.ENABLE_SIGNED_UPDATE_METADATA == 'true'
+        env:
+          RUSTDESK_UPDATE_ED25519_SEED: ${{ secrets.RUSTDESK_UPDATE_ED25519_SEED }}
+          RUSTDESK_UPDATE_ED25519_PUBLIC_KEY: ${{ vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY }}
+        run: |
+          python3 -m pip install --only-binary=:all: --require-hashes -r res/update/update_metadata_requirements.txt
+          python3 res/update/generate_update_metadata.py check-key
       - name: Validate release ref
         run: test "$GITHUB_REF_TYPE" = "tag" && [[ "$GITHUB_REF_NAME" == v* ]]
 
@@ -86,6 +112,33 @@ jobs:
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
 
+      - name: Sign and verify fork update metadata
+        if: vars.ENABLE_SIGNED_UPDATE_METADATA == 'true'
+        env:
+          RUSTDESK_UPDATE_ED25519_SEED: ${{ secrets.RUSTDESK_UPDATE_ED25519_SEED }}
+          RUSTDESK_UPDATE_ED25519_PUBLIC_KEY: ${{ vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --only-binary=:all: --require-hashes -r res/update/update_metadata_requirements.txt
+          python3 res/update/generate_update_metadata.py check-key
+          version=$(python3 build.py --print-version)
+          sign_args=()
+          verify_args=()
+          for file in "release/rustdesk-${version}-x86_64.exe" "release/rustdesk-${version}-x86_64.msi"; do
+            test -f "$file"
+            sign_args+=(--artifact windows x86_64 "${file##*.}" "$file")
+            verify_args+=(--artifact "$file")
+          done
+          release_url="https://github.com/Elyor1977/rustdesk/releases/download"
+          python3 res/update/generate_update_metadata.py sign "${sign_args[@]}" \
+            --version "$version" --release-id "$GITHUB_REF_NAME" --package-id rustdesk \
+            --release-base-url "$release_url" --published-at "$(git log -1 --format=%cI)" \
+            --metadata-out release/rustdesk-update.json --signature-out release/rustdesk-update.json.sig
+          python3 res/update/generate_update_metadata.py verify "${verify_args[@]}" \
+            --metadata release/rustdesk-update.json --signature release/rustdesk-update.json.sig \
+            --version "$version" --release-id "$GITHUB_REF_NAME" --package-id rustdesk \
+            --release-base-url "$release_url"
+
       - name: Generate SBOM and checksums
         run: |
           rm -f release/SHA256SUMS.txt
@@ -106,6 +159,7 @@ jobs:
             release/*.exe
             release/*.msi
             release/*.json
+            release/*.sig
             release/SHA256SUMS.txt
 
       - name: Publish GitHub release

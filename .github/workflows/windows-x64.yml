@@ -40,6 +40,7 @@ on:
       - "src/**"
 
 env:
+  RUSTDESK_UPDATE_ED25519_PUBLIC_KEY: ${{ !inputs.windows-7 && vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY || '' }}
   RUST_VERSION: "1.88"
   LLVM_VERSION: "15.0.6"
   FLUTTER_VERSION: "3.24.5"
