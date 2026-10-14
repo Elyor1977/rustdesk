@@ -390,7 +390,7 @@ pub fn match_event(event: &rdev::Event) -> Option<String> {
     // AltGraph is text input, not the ordinary Alt recorded in a shortcut.
     // Keep the shared modifier snapshot unchanged for remote key encoding.
     #[cfg(target_os = "windows")]
-    if unsafe { super::IS_0X021D_DOWN }
+    if super::IS_0X021D_DOWN.load(std::sync::atomic::Ordering::SeqCst)
         && super::MODIFIERS_STATE
             .lock()
             .unwrap()
