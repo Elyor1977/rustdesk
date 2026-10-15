@@ -21,6 +21,17 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_platform_rust_checks_skip_retained_interactive_tests(self):
+        jobs = workflow("flutter-build")["jobs"]
+        checks = [step for job in jobs.values() for step in job.get("steps", [])
+                  if step.get("name") == "Run the Rust tests"]
+        self.assertEqual(len(checks), 2)
+        for step in checks:
+            command = next(line for line in step["run"].splitlines()
+                           if "cargo test" in line and "--lib" in line)
+            self.assertIn("--skip test_get_cursor_pos", command)
+            self.assertIn("--skip test_get_key_state", command)
+
     def test_fork_update_public_key_reaches_desktop_builds(self):
         for name, value in (
             ("windows-x64", "${{ !inputs.windows-7 && vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY || '' }}"),

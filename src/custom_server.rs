@@ -236,4 +236,21 @@ mod test {
             get_custom_server_from_string("=0nI900VsFHZVBVdIlncwpHS4V0bOZ0dtVldrpVO4JHdCp0YV5WdzUGZzdnYRVjI6ISeltmIsISMuEjLx4SMiojI0N3boJye.exe")
                 .unwrap(), lic);
     }
+
+    #[test]
+    fn test_filename_license_string_in_non_ascii_path() {
+        // Windows passes the full exe path, and `İ` grows from 2 to 3 bytes when lowercased.
+        assert_eq!(
+            get_custom_server_from_string(
+                r"C:\Users\İsmail\Downloads\rustdesk-host=server.example.net,key=Zm9vYmFyLiwyCg==.exe"
+            )
+            .unwrap(),
+            CustomServer {
+                host: "server.example.net".to_owned(),
+                key: "Zm9vYmFyLiwyCg==".to_owned(),
+                api: "".to_owned(),
+                relay: "".to_owned(),
+            }
+        );
+    }
 }
