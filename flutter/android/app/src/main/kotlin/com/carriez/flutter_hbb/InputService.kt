@@ -49,6 +49,8 @@ const val WHEEL_BUTTON_DOWN = 33
 const val WHEEL_BUTTON_UP = 34
 const val WHEEL_DOWN = 523331
 const val WHEEL_UP = 963
+// src/common.rs: wheel deltas use type 3, with y < 0 for wheel down.
+const val MOUSE_TYPE_WHEEL = 3
 
 const val TOUCH_SCALE_START = 1
 const val TOUCH_SCALE = 2
@@ -181,6 +183,26 @@ class InputService : AccessibilityService() {
                 recentActionTask!!.cancel()
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
+            return
+        }
+
+        if (mask == MOUSE_TYPE_WHEEL && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            if (_y == 0 || mouseY < WHEEL_STEP) {
+                return
+            }
+            val path = Path()
+            path.moveTo(mouseX.toFloat(), mouseY.toFloat())
+            val deltaY = if (_y < 0) -WHEEL_STEP else WHEEL_STEP
+            path.lineTo(mouseX.toFloat(), (mouseY + deltaY).toFloat())
+            val stroke = GestureDescription.StrokeDescription(
+                path,
+                0,
+                WHEEL_DURATION
+            )
+            val builder = GestureDescription.Builder()
+            builder.addStroke(stroke)
+            wheelActionsQueue.offer(builder.build())
+            consumeWheelActions()
             return
         }
 
