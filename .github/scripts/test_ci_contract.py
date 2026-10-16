@@ -21,6 +21,13 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_fdroid_locks_build_dependencies_not_the_patched_bridge(self):
+        source = (ROOT / "flutter/build_fdroid.sh").read_text(encoding="utf-8")
+        prebuild, build = source.split("\nbuild)\n", 1)
+        self.assertIn("flutter packages pub get\n", prebuild)
+        self.assertNotIn("pub get --enforce-lockfile", prebuild)
+        self.assertIn("flutter packages pub get --enforce-lockfile", build)
+
     def test_platform_rust_checks_skip_retained_interactive_tests(self):
         jobs = workflow("flutter-build")["jobs"]
         checks = [step for job in jobs.values() for step in job.get("steps", [])
