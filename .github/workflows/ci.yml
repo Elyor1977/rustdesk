@@ -91,7 +91,10 @@ jobs:
     - name: Run cargo audit
       run: |
         cargo install cargo-audit --version 0.22.0 --locked
-        cargo audit
+        python3 -m unittest discover -s .github/scripts -p test_tls_roots.py
+        python3 .github/scripts/check_tls_roots.py
+        # 0.26.11 re-exports the patched v1 store; the guard rejects any other exemption.
+        cargo audit --ignore RUSTSEC-2026-0381
 
     - name: Test CI contracts and Windows 7 compatibility checks
       run: |
