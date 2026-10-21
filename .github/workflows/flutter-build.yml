@@ -377,8 +377,8 @@ jobs:
           # The build's own features, so the tests see the code that ships.
           FEATURES=$(python3 ./build.py --portable --flutter --skip-portable-pack --hwcodec ${{ matrix.job.build-args }} --print-features)
           cargo test --locked --release --lib --features "$FEATURES" -- --skip test_get_cursor_pos --skip test_get_key_state
-          # Its Windows tests run nowhere else.
-          cargo test --locked --release -p clipboard
+          # These Windows package tests are not included in the root --lib run.
+          cargo test --locked --release -p clipboard -p base
 
       - name: find Runner.res
         # Windows: find Runner.res (compiled from ./flutter/windows/runner/Runner.rc), copy to ./Runner.res

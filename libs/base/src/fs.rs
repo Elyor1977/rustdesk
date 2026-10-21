@@ -61,6 +61,12 @@ async fn open_for_write(path: &str, create: bool, truncate: bool) -> std::io::Re
     }
 }
 
+pub mod download;
+
+#[cfg(test)]
+#[path = "fs/download_tests.rs"]
+mod download_tests;
+
 pub fn get_next_job_id() -> i32 {
     NEXT_JOB_ID.fetch_add(1, Ordering::SeqCst)
 }
@@ -460,6 +466,8 @@ pub struct TransferJob {
     /// and `job_error()` reports the failure instead of a successful completion.
     #[serde(skip_serializing)]
     write_error: Option<String>,
+    #[serde(skip)]
+    download: Option<download::DownloadState>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -630,6 +638,7 @@ impl TransferJob {
             files: Vec::new(),
             total_size: 0,
             enable_overwrite_detection,
+            download: (is_remote && r#type == JobType::Generic).then(Default::default),
             ..Default::default()
         }
     }
@@ -691,6 +700,9 @@ impl TransferJob {
 
     #[inline]
     pub fn set_files(&mut self, files: Vec<FileEntry>) -> ResultType<()> {
+        if self.is_download() && !self.files.is_empty() {
+            bail!("cannot replace an accepted download file list");
+        }
         validate_transfer_file_names(&files)?;
         if let DataSource::FilePath(base) = &self.data_source {
             for file in &files {
@@ -735,7 +747,12 @@ impl TransferJob {
 
     fn resolve_entry_path(&self, base: &PathBuf, name: &str) -> Option<PathBuf> {
         if self.r#type == JobType::Generic {
-            match join_validated_path(base, name) {
+            let result = if self.is_download() {
+                download::validated_target(base, name)
+            } else {
+                join_validated_path(base, name)
+            };
+            match result {
                 Ok(path) => Some(path),
                 Err(err) => {
                     log::error!("Invalid file name in transfer job {}: {}", self.id, err);
@@ -748,6 +765,12 @@ impl TransferJob {
     }
 
     pub fn modify_time(&self) {
+        if self.is_download() {
+            if let Err(err) = self.finish_download() {
+                log::error!("Failed to finish download {}: {}", self.id, err);
+            }
+            return;
+        }
         if self.r#type == JobType::Printer {
             return;
         }
@@ -772,6 +795,9 @@ impl TransferJob {
     }
 
     pub fn remove_download_file(&self) {
+        if self.is_download() && self.data_stream.is_none() {
+            return;
+        }
         if self.r#type == JobType::Printer {
             return;
         }
@@ -816,12 +842,18 @@ impl TransferJob {
         }
         let res = self.write_block(block).await;
         if let Err(err) = res.as_ref() {
-            self.write_error = Some(err.to_string());
+            // Waiting for overwrite approval is recoverable, unlike a write failure.
+            if !err.is::<download::NeedsConfirmation>() {
+                self.write_error = Some(err.to_string());
+            }
         }
         res
     }
 
     async fn write_block(&mut self, block: FileTransferBlock) -> ResultType<()> {
+        if self.is_download() {
+            return self.write_download(block).await;
+        }
         if block.id != self.id {
             bail!("Wrong id");
         }
@@ -1235,6 +1267,14 @@ impl TransferJob {
     }
 
     pub async fn confirm(&mut self, r: &FileTransferSendConfirmRequest) -> bool {
+        if self.is_download() {
+            self.confirm_download(r);
+            // Open receiver resume streams in write() so validation errors reach the caller.
+            if matches!(r.union, Some(file_transfer_send_confirm_request::Union::OffsetBlk(offset)) if offset > 0)
+            {
+                return true;
+            }
+        }
         if self.file_num() != r.file_num {
             // This branch will always be hit if:
             // 1. `confirm()` is called in `ui_cm_interface.rs`
@@ -1726,8 +1766,20 @@ mod tests {
     #[tokio::test]
     async fn failed_resume_blocks_io_until_new_confirmation() {
         let tmp_root = TestTempDir::new("rustdesk_resume_error");
-        let mut job =
-            new_write_job(9, tmp_root.path.clone(), "missing.bin").expect("create write job");
+        std::fs::create_dir_all(&tmp_root.path).expect("create source directory");
+        let source = tmp_root.join("short.bin");
+        std::fs::write(&source, []).expect("create short source file");
+        let mut job = TransferJob::new_read(
+            9,
+            JobType::Generic,
+            "/fake/remote".to_owned(),
+            DataSource::FilePath(source),
+            0,
+            false,
+            false,
+            false,
+        )
+        .expect("create read job");
         let failed_resume = FileTransferSendConfirmRequest {
             id: 9,
             file_num: 0,

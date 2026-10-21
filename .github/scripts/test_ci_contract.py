@@ -21,6 +21,12 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_tls_audit_exemption_requires_a_verified_roots_graph(self):
+        steps = workflow("ci")["jobs"]["cargo_audit"]["steps"]
+        command = next(step["run"] for step in steps if step.get("name") == "Run cargo audit")
+        self.assertLess(command.index("python3 .github/scripts/check_tls_roots.py"),
+                        command.index("cargo audit --ignore RUSTSEC-2026-0381"))
+
     def test_fdroid_locks_build_dependencies_not_the_patched_bridge(self):
         source = (ROOT / "flutter/build_fdroid.sh").read_text(encoding="utf-8")
         prebuild, build = source.split("\nbuild)\n", 1)
