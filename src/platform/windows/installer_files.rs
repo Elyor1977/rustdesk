@@ -192,11 +192,10 @@ mod tests {
             Security::{
                 AccessCheck,
                 Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
-                CreateRestrictedToken, CreateWellKnownSid, DuplicateToken, SecurityImpersonation,
-                WinBuiltinAdministratorsSid, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE,
-                GENERIC_MAPPING, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-                PRIVILEGE_SET, PSID, SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES, TOKEN_DUPLICATE,
-                TOKEN_QUERY,
+                CreateRestrictedToken, DuplicateToken, ImpersonateLoggedOnUser, RevertToSelf,
+                SecurityImpersonation, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE,
+                GENERIC_MAPPING, GROUP_SECURITY_INFORMATION, LUA_TOKEN, OWNER_SECURITY_INFORMATION,
+                PRIVILEGE_SET, TOKEN_DUPLICATE, TOKEN_QUERY,
             },
             Storage::FileSystem::{
                 FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
@@ -257,9 +256,16 @@ mod tests {
         let root = std::env::temp_dir().join(format!("rustdesk-staging-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let path = root.join("input.tmp");
-        let file =
-            ProtectedInstallFile::create(&path, &mut io::Cursor::new(b"rustdesk"), Some(HASH))
-                .unwrap();
+        // An elevated process can default to Administrators as the file owner.
+        // Create as the ordinary user whose access this test checks instead.
+        let file = unsafe {
+            let token = ordinary_owner_token();
+            ImpersonateLoggedOnUser(*token).unwrap();
+            let result =
+                ProtectedInstallFile::create(&path, &mut io::Cursor::new(b"rustdesk"), Some(HASH));
+            RevertToSelf().unwrap();
+            result.unwrap()
+        };
         assert_eq!(
             ordinary_owner_access(file.path()),
             (FILE_GENERIC_READ | FILE_GENERIC_EXECUTE).0
@@ -335,28 +341,12 @@ mod tests {
             .unwrap();
         }
         let original = unsafe { Owned::new(original) };
-        let mut sid = [0; SECURITY_MAX_SID_SIZE as usize];
-        let sid_pointer = PSID(sid.as_mut_ptr().cast());
-        let mut size = sid.len() as u32;
-        unsafe {
-            CreateWellKnownSid(
-                WinBuiltinAdministratorsSid,
-                None,
-                Some(sid_pointer),
-                &mut size,
-            )
-            .unwrap();
-        }
-        let disabled = [SID_AND_ATTRIBUTES {
-            Sid: sid_pointer,
-            Attributes: 0,
-        }];
         let mut restricted = HANDLE::default();
         unsafe {
             CreateRestrictedToken(
                 *original,
-                DISABLE_MAX_PRIVILEGE,
-                Some(&disabled),
+                DISABLE_MAX_PRIVILEGE | LUA_TOKEN,
+                None,
                 None,
                 None,
                 &mut restricted,
