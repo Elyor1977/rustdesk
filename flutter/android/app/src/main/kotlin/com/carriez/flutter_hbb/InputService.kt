@@ -49,9 +49,6 @@ const val WHEEL_BUTTON_DOWN = 33
 const val WHEEL_BUTTON_UP = 34
 const val WHEEL_DOWN = 523331
 const val WHEEL_UP = 963
-// src/common.rs: wheel deltas use type 3, with y < 0 for wheel down.
-const val MOUSE_TYPE_WHEEL = 3
-
 // src/common.rs MOUSE_TYPE_WHEEL: the controller sends a wheel tick as a
 // MouseEvent with these type bits and the scroll delta in y (y < 0 = down).
 const val MOUSE_TYPE_WHEEL = 3

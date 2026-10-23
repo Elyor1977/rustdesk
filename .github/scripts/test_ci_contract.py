@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 import subprocess
 import unittest
@@ -21,6 +22,12 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_android_input_has_unique_top_level_constants(self):
+        source = (ROOT / "flutter/android/app/src/main/kotlin/com/carriez/flutter_hbb/InputService.kt").read_text(encoding="utf-8")
+        names = re.findall(r"^const val (\w+)\b", source, re.MULTILINE)
+        self.assertEqual(len(names), len(set(names)),
+                         "Duplicate Kotlin constants prevent APK compilation")
+
     def test_tls_audit_exemption_requires_a_verified_roots_graph(self):
         steps = workflow("ci")["jobs"]["cargo_audit"]["steps"]
         command = next(step["run"] for step in steps if step.get("name") == "Run cargo audit")
