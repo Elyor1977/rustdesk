@@ -8,7 +8,12 @@ fn build_windows() {
     } else {
         "windows"
     };
-    cc::Build::new().file(file).file(file2).compile(library);
+    let mut build = cc::Build::new();
+    if !cfg!(feature = "flutter") {
+        build.cpp(true).std("c++17").define("RUSTDESK_SCITER", None);
+        println!("cargo:rerun-if-changed=flutter/windows/runner/service_control.h");
+    }
+    build.file(file).file(file2).compile(library);
     println!("cargo:rustc-link-lib=WtsApi32");
     println!("cargo:rerun-if-changed={}", file);
     println!("cargo:rerun-if-changed={}", file2);
