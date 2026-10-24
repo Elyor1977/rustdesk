@@ -186,7 +186,7 @@ ttf-parser = "0.25"
 libxdo-sys = "0.11"
 psimple = { package = "libpulse-simple-binding", version = "2.27" }
 pulse = { package = "libpulse-binding", version = "2.27" }
-rust-pulsectl = { git = "https://github.com/rustdesk-org/pulsectl", rev = "aa34dde499aa912a3abc5289cc0b547bd07dd6e2" }
+rust-pulsectl = { git = "https://github.com/rustdesk-org/pulsectl", rev = "d2ec086b5770dce934a66956364d09df8cc9484c" }
 async-process = "1.7"
 evdev = { git="https://github.com/rustdesk-org/evdev", rev = "cec616e37790293d2cd2aa54a96601ed6b1b35a9" }
 dbus = "0.9"
