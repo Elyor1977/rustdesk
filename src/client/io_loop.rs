@@ -1598,6 +1598,11 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                 }
                 Some(message::Union::Hash(hash)) => {
+                    hbb_common::throttled_log!(
+                        Duration::from_secs(1),
+                        debug,
+                        "[auth-diag] client password_challenge_received"
+                    );
                     if !self
                         .handler
                         .handle_hash(&self.handler.password.clone(), hash, peer)
@@ -1608,6 +1613,11 @@ impl<T: InvokeUiSession> Remote<T> {
                 }
                 Some(message::Union::LoginResponse(lr)) => match lr.union {
                     Some(login_response::Union::Error(err)) => {
+                        hbb_common::throttled_log!(
+                            Duration::from_secs(1),
+                            debug,
+                            "[auth-diag] client login_error_received"
+                        );
                         if err == client::REQUIRE_2FA {
                             self.handler.lc.write().unwrap().enable_trusted_devices =
                                 lr.enable_trusted_devices;
@@ -1617,6 +1627,11 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                     }
                     Some(login_response::Union::PeerInfo(pi)) => {
+                        hbb_common::throttled_log!(
+                            Duration::from_secs(1),
+                            debug,
+                            "[auth-diag] client login_peer_info_received"
+                        );
                         let peer_version = pi.version.clone();
                         let peer_platform = pi.platform.clone();
                         self.set_peer_info(&pi);

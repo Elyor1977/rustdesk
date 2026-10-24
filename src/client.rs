@@ -4846,7 +4846,19 @@ async fn send_login(
         .read()
         .unwrap()
         .create_login_msg(os_username, os_password, password);
-    allow_err!(peer.send(&msg_out).await);
+    hbb_common::throttled_log!(
+        Duration::from_secs(1),
+        debug,
+        "[auth-diag] client login_request_send_begin"
+    );
+    let result = peer.send(&msg_out).await;
+    hbb_common::throttled_log!(
+        Duration::from_secs(1),
+        debug,
+        "[auth-diag] client login_request_send_end ok={}",
+        result.is_ok()
+    );
+    allow_err!(result);
 }
 
 /// Handle login request made from ui.

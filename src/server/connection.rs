@@ -1857,6 +1857,13 @@ impl Connection {
     // Returns whether this connection should be kept alive.
     // `true` does not necessarily mean authorization succeeded (e.g. REQUIRE_2FA case).
     async fn send_logon_response_and_keep_alive(&mut self) -> bool {
+        hbb_common::throttled_log!(
+            Duration::from_secs(1),
+            debug,
+            "[auth-diag] server conn={} authorization_begin already_authorized={}",
+            self.inner.id(),
+            self.authorized
+        );
         if self.authorized {
             return true;
         }
@@ -1905,6 +1912,12 @@ impl Connection {
             return false;
         }
         self.authorized = true;
+        hbb_common::throttled_log!(
+            Duration::from_secs(1),
+            debug,
+            "[auth-diag] server conn={} authorization_granted",
+            self.inner.id()
+        );
         self.unauthorized_id = None;
         // One-time means gone once it has let a peer in, not once that peer
         // leaves. This session's later logins come in on the password the
@@ -2404,6 +2417,12 @@ impl Connection {
     }
 
     async fn send_login_error<T: std::string::ToString>(&mut self, err: T) {
+        hbb_common::throttled_log!(
+            Duration::from_secs(1),
+            debug,
+            "[auth-diag] server conn={} login_error_response",
+            self.inner.id()
+        );
         let mut msg_out = Message::new();
         let mut res = LoginResponse::new();
         res.set_error(err.to_string());
@@ -2915,6 +2934,7 @@ impl Connection {
         }
         // After handling CloseReason messages, proceed to process other message types
         if let Some(message::Union::LoginRequest(lr)) = msg.union {
+            hbb_common::throttled_log!(Duration::from_secs(1), debug, "[auth-diag] server conn={} login_request_received password_present={} already_authorized={}", self.inner.id(), !lr.password.is_empty(), self.authorized);
             if !self.check_login_scope(&lr).await {
                 return false;
             }
@@ -3084,6 +3104,12 @@ impl Connection {
                     return true;
                 }
                 if !self.validate_password(allow_logon_screen_password) {
+                    hbb_common::throttled_log!(
+                        Duration::from_secs(1),
+                        debug,
+                        "[auth-diag] server conn={} password_rejected",
+                        self.inner.id()
+                    );
                     self.update_failure_with_scope(failure, false, 0, FailureScope::Default);
                     self.check_update_temporary_password(false);
                     self.send_login_error(crate::client::LOGIN_MSG_PASSWORD_WRONG)
@@ -3091,6 +3117,12 @@ impl Connection {
                     self.try_start_cm(lr.my_id, lr.my_name, false);
                 } else {
                     self.update_failure_with_scope(failure, true, 0, FailureScope::Default);
+                    hbb_common::throttled_log!(
+                        Duration::from_secs(1),
+                        debug,
+                        "[auth-diag] server conn={} password_accepted",
+                        self.inner.id()
+                    );
                     if !self.send_logon_response_and_keep_alive().await {
                         return false;
                     }
@@ -5637,7 +5669,26 @@ impl Connection {
 
     #[inline]
     async fn send(&mut self, msg: Message) {
-        allow_err!(self.stream.send(&msg).await);
+        let login_response = matches!(msg.union.as_ref(), Some(message::Union::LoginResponse(_)));
+        if login_response {
+            hbb_common::throttled_log!(
+                Duration::from_secs(1),
+                debug,
+                "[auth-diag] server conn={} login_response_send_begin",
+                self.inner.id()
+            );
+        }
+        let result = self.stream.send(&msg).await;
+        if login_response {
+            hbb_common::throttled_log!(
+                Duration::from_secs(1),
+                debug,
+                "[auth-diag] server conn={} login_response_send_end ok={}",
+                self.inner.id(),
+                result.is_ok()
+            );
+        }
+        allow_err!(result);
     }
 
     pub fn alive_conns() -> Vec<i32> {

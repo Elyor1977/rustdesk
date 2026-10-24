@@ -22,6 +22,22 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_auth_diagnostics_are_throttled_and_metadata_only(self):
+        allowed = {"self.inner.id()", "self.authorized",
+                   "!lr.password.is_empty()", "result.is_ok()"}
+        for relative, expected in (("src/client.rs", 2),
+                                   ("src/client/io_loop.rs", 3),
+                                   ("src/server/connection.rs", 8)):
+            source = (ROOT / relative).read_text(encoding="utf-8")
+            sites = re.findall(
+                r'hbb_common::throttled_log!\(\s*Duration::from_secs\(1\),\s*debug,\s*'
+                r'"\[auth-diag\][^"\n]*"(.*?)\);', source, re.DOTALL)
+            self.assertEqual(len(sites), expected, relative)
+            self.assertEqual(source.count("[auth-diag]"), expected, relative)
+            for arguments in sites:
+                self.assertTrue({part.strip() for part in arguments.split(",")
+                                 if part.strip()} <= allowed, relative)
+
     def test_android_input_has_unique_top_level_constants(self):
         source = (ROOT / "flutter/android/app/src/main/kotlin/com/carriez/flutter_hbb/InputService.kt").read_text(encoding="utf-8")
         names = re.findall(r"^const val (\w+)\b", source, re.MULTILINE)
