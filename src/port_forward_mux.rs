@@ -1,3 +1,4 @@
+use base::message_proto::*;
 use hbb_common::{
     bytes::Bytes,
     log,
@@ -9,7 +10,6 @@ use hbb_common::{
     },
     ResultType,
 };
-use base::message_proto::*;
 use std::sync::{Arc, Mutex};
 
 /// On the wire and fixed forever: what the controller may have in flight on a
@@ -198,11 +198,13 @@ pub fn close_msg(id: i32) -> Message {
 }
 
 pub fn window_update_msg(id: i32, add: u32) -> Message {
-    channel_msg(port_forward_channel::Union::WindowUpdate(PortForwardWindowUpdate {
-        channel_id: id,
-        add,
-        ..Default::default()
-    }))
+    channel_msg(port_forward_channel::Union::WindowUpdate(
+        PortForwardWindowUpdate {
+            channel_id: id,
+            add,
+            ..Default::default()
+        },
+    ))
 }
 
 /// Where a channel's frames go. The controller keeps two queues so
@@ -380,10 +382,21 @@ pub async fn run_channel<R, W>(
 {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let mut to_tunnel = tokio::spawn(relay_socket_to_tunnel(
-        id, reader, prebuf, credit, sink.clone(), cancel_rx.clone(),
+        id,
+        reader,
+        prebuf,
+        credit,
+        sink.clone(),
+        cancel_rx.clone(),
     ));
     let mut to_socket = tokio::spawn(relay_tunnel_to_socket(
-        id, writer, initial_out, inbound, window, sink.clone(), cancel_rx,
+        id,
+        writer,
+        initial_out,
+        inbound,
+        window,
+        sink.clone(),
+        cancel_rx,
     ));
     let (first, second) = tokio::select! {
         r = &mut to_tunnel => {
@@ -410,7 +423,12 @@ pub async fn run_channel<R, W>(
             log::debug!("port forward channel {} close not sent: {}", id, e);
         }
     }
-    log::debug!("port forward channel {} ended: {:?} / {:?}", id, first, second);
+    log::debug!(
+        "port forward channel {} ended: {:?} / {:?}",
+        id,
+        first,
+        second
+    );
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -420,12 +438,7 @@ pub use tunnel::{Claim, Tunnel};
 mod tunnel {
     use super::*;
     use crate::client::Interface;
-    use hbb_common::{
-        config::READ_TIMEOUT,
-        protobuf::Message as _,
-        tokio::net::TcpStream,
-        Stream,
-    };
+    use hbb_common::{config::READ_TIMEOUT, protobuf::Message as _, tokio::net::TcpStream, Stream};
     use std::{
         collections::HashMap,
         sync::atomic::{AtomicI32, Ordering},
@@ -479,12 +492,19 @@ mod tunnel {
             }
         }
 
-        pub fn set_muxed(&self, mut stream: Stream, interface: impl Interface) -> Arc<TunnelHandle> {
+        pub fn set_muxed(
+            &self,
+            mut stream: Stream,
+            interface: impl Interface,
+        ) -> Arc<TunnelHandle> {
             cap_packet_size(&mut stream);
             let (data_tx, data_rx) = mpsc::channel(DATA_QUEUE_FRAMES);
             let (control_tx, control_rx) = mpsc::unbounded_channel();
             let handle = Arc::new(TunnelHandle {
-                sink: FrameSink::Queued { data: data_tx, control: control_tx },
+                sink: FrameSink::Queued {
+                    data: data_tx,
+                    control: control_tx,
+                },
                 channels: Mutex::new(HashMap::new()),
                 next_id: AtomicI32::new(1),
                 reported: Default::default(),
@@ -581,7 +601,19 @@ mod tunnel {
             let handle = self.clone();
             tokio::spawn(async move {
                 if sink.send_ordered(open).await.is_ok() {
-                    run_channel(id, reader, writer, prebuf, Vec::new(), credit, window, inbound_rx, sink, teardown).await;
+                    run_channel(
+                        id,
+                        reader,
+                        writer,
+                        prebuf,
+                        Vec::new(),
+                        credit,
+                        window,
+                        inbound_rx,
+                        sink,
+                        teardown,
+                    )
+                    .await;
                 }
                 handle.channels.lock().unwrap().remove(&id);
             });
@@ -603,7 +635,11 @@ mod tunnel {
                             }
                             None
                         } else if let Some(e) = channels.remove(&o.channel_id) {
-                            log::debug!("port forward channel {} refused: {}", o.channel_id, o.message);
+                            log::debug!(
+                                "port forward channel {} refused: {}",
+                                o.channel_id,
+                                o.message
+                            );
                             e.inbound.send(Inbound::Close).ok();
                             Some(o.message)
                         } else {
@@ -646,7 +682,10 @@ mod tunnel {
                     None
                 }
                 Some(port_forward_channel::Union::Open(o)) => {
-                    log::debug!("ignoring open for channel {} on the controller", o.channel_id);
+                    log::debug!(
+                        "ignoring open for channel {} on the controller",
+                        o.channel_id
+                    );
                     None
                 }
                 _ => None,
@@ -908,8 +947,10 @@ mod tests {
         match m.union {
             Some(message::Union::PortForwardChannel(ch)) => match ch.union {
                 Some(port_forward_channel::Union::Opened(o)) => {
-                    assert_eq!((o.channel_id, o.success, o.message.as_str(), o.window),
-                               (3, false, "nope", CHANNEL_WINDOW));
+                    assert_eq!(
+                        (o.channel_id, o.success, o.message.as_str(), o.window),
+                        (3, false, "nope", CHANNEL_WINDOW)
+                    );
                 }
                 other => panic!("unexpected {:?}", other),
             },
@@ -940,7 +981,12 @@ mod tests {
 
     /// The channel subscribes to `teardown` here, so a test can hand in one
     /// that has already been raised.
-    fn harness_on(id: i32, prebuf: Vec<u8>, initial_out: Vec<Bytes>, teardown: watch::Sender<bool>) -> Harness {
+    fn harness_on(
+        id: i32,
+        prebuf: Vec<u8>,
+        initial_out: Vec<Bytes>,
+        teardown: watch::Sender<bool>,
+    ) -> Harness {
         let (data_tx, data_rx) = mpsc::channel(DATA_QUEUE_FRAMES);
         let (control_tx, control_rx) = mpsc::unbounded_channel();
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
@@ -948,12 +994,33 @@ mod tests {
         let (r, w) = tokio::io::split(remote);
         let credit = Arc::new(SendCredit::new(INITIAL_WINDOW));
         let window = Arc::new(Mutex::new(RecvWindow::new(CHANNEL_WINDOW)));
-        let sink = FrameSink::Queued { data: data_tx, control: control_tx };
+        let sink = FrameSink::Queued {
+            data: data_tx,
+            control: control_tx,
+        };
         let teardown_rx = teardown.subscribe();
         let task = tokio::spawn(run_channel(
-            id, r, w, prebuf, initial_out, credit.clone(), window.clone(), inbound_rx, sink, teardown_rx,
+            id,
+            r,
+            w,
+            prebuf,
+            initial_out,
+            credit.clone(),
+            window.clone(),
+            inbound_rx,
+            sink,
+            teardown_rx,
         ));
-        Harness { data_rx, control_rx, inbound_tx, credit, window, local, teardown, task }
+        Harness {
+            data_rx,
+            control_rx,
+            inbound_tx,
+            credit,
+            window,
+            local,
+            teardown,
+            task,
+        }
     }
 
     // `PortForwardData.data` is generated as `bytes::Bytes` (hbb_common builds
@@ -962,7 +1029,9 @@ mod tests {
     fn frame_kind(m: &Message) -> (&'static str, i32, Vec<u8>) {
         match &m.union {
             Some(message::Union::PortForwardChannel(ch)) => match &ch.union {
-                Some(port_forward_channel::Union::Data(d)) => ("data", d.channel_id, d.data.to_vec()),
+                Some(port_forward_channel::Union::Data(d)) => {
+                    ("data", d.channel_id, d.data.to_vec())
+                }
                 Some(port_forward_channel::Union::Close(c)) => ("close", c.channel_id, vec![]),
                 Some(port_forward_channel::Union::WindowUpdate(u)) => {
                     ("window_update", u.channel_id, u.add.to_le_bytes().to_vec())
@@ -988,11 +1057,14 @@ mod tests {
             // queue, which stays open here: teardown alone must end them.
             let mut h = harness(1, vec![], vec![]);
             for _ in 0..17 {
-                h.inbound_tx.send(Inbound::Data(Bytes::from(vec![0u8; MAX_FRAME]))).unwrap();
+                h.inbound_tx
+                    .send(Inbound::Data(Bytes::from(vec![0u8; MAX_FRAME])))
+                    .unwrap();
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             h.teardown.send_replace(true);
-            let ended = tokio::time::timeout(std::time::Duration::from_millis(500), &mut h.task).await;
+            let ended =
+                tokio::time::timeout(std::time::Duration::from_millis(500), &mut h.task).await;
             assert!(ended.is_ok(), "channel task outlived the tunnel");
         });
     }
@@ -1007,7 +1079,8 @@ mod tests {
             let teardown = watch::channel(false).0;
             teardown.send_replace(true);
             let mut h = harness_on(1, vec![], vec![], teardown);
-            let ended = tokio::time::timeout(std::time::Duration::from_millis(500), &mut h.task).await;
+            let ended =
+                tokio::time::timeout(std::time::Duration::from_millis(500), &mut h.task).await;
             assert!(ended.is_ok(), "late channel outlived the tunnel");
         });
     }
@@ -1058,12 +1131,11 @@ mod tests {
                 got += frame_kind(&h.data_rx.recv().await.unwrap()).2.len();
             }
             assert_eq!(got, INITIAL_WINDOW as usize);
-            assert!(tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                h.data_rx.recv()
-            )
-            .await
-            .is_err());
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), h.data_rx.recv())
+                    .await
+                    .is_err()
+            );
             // One minimum charge is enough to send the 5-byte tail.
             h.credit.add(MIN_FRAME_CHARGE);
             assert_eq!(frame_kind(&h.data_rx.recv().await.unwrap()).2.len(), 5);
@@ -1098,7 +1170,10 @@ mod tests {
             h.local.write_all(b"bye").await.unwrap();
             drop(h.local);
             assert_eq!(frame_kind(&h.data_rx.recv().await.unwrap()).0, "data");
-            assert_eq!(frame_kind(&h.data_rx.recv().await.unwrap()), ("close", 5, vec![]));
+            assert_eq!(
+                frame_kind(&h.data_rx.recv().await.unwrap()),
+                ("close", 5, vec![])
+            );
             h.task.await.unwrap();
             assert!(h.data_rx.try_recv().is_err());
         });
@@ -1120,7 +1195,10 @@ mod tests {
         rt().block_on(async {
             let mut h = harness(7, vec![], vec![]);
             h.inbound_tx.send(Inbound::Violation).unwrap();
-            assert_eq!(frame_kind(&h.data_rx.recv().await.unwrap()), ("close", 7, vec![]));
+            assert_eq!(
+                frame_kind(&h.data_rx.recv().await.unwrap()),
+                ("close", 7, vec![])
+            );
             h.task.await.unwrap();
         });
     }
@@ -1138,7 +1216,10 @@ mod tests {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     mod tunnel {
         use super::*;
-        use crate::port_forward_mux::{tunnel::{TunnelHandle, MAX_REPORTED_OPEN_ERRORS}, Claim, Tunnel};
+        use crate::port_forward_mux::{
+            tunnel::{TunnelHandle, MAX_REPORTED_OPEN_ERRORS},
+            Claim, Tunnel,
+        };
         use hbb_common::{
             protobuf::Message as _,
             tcp::FramedStream,
@@ -1193,7 +1274,10 @@ mod tests {
                 theirs.write_all(&head.to_le_bytes()[..3]).await.unwrap();
                 let deadline = Instant::now() + Duration::from_secs(2);
                 while !matches!(t.claim(), Claim::Claimed) {
-                    assert!(Instant::now() < deadline, "tunnel still up: the oversized header was accepted");
+                    assert!(
+                        Instant::now() < deadline,
+                        "tunnel still up: the oversized header was accepted"
+                    );
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
             });
@@ -1243,22 +1327,32 @@ mod tests {
                 assert!(matches!(t.claim(), Claim::Claimed));
                 let h = t.set_muxed(ours, NoUi::default());
                 let (mut app, sock) = local_pair().await;
-                h.open("localhost", 80, sock, b"GET / HTTP/1.0\r\n\r\n".to_vec()).unwrap();
+                h.open("localhost", 80, sock, b"GET / HTTP/1.0\r\n\r\n".to_vec())
+                    .unwrap();
                 let open = recv_frame(&mut peer).await;
                 let id = match &open.union {
                     Some(port_forward_channel::Union::Open(o)) => {
-                        assert_eq!((o.host.as_str(), o.port, o.window), ("localhost", 80, CHANNEL_WINDOW));
+                        assert_eq!(
+                            (o.host.as_str(), o.port, o.window),
+                            ("localhost", 80, CHANNEL_WINDOW)
+                        );
                         o.channel_id
                     }
                     other => panic!("expected open, got {:?}", other),
                 };
                 let d = recv_frame(&mut peer).await;
                 match &d.union {
-                    Some(port_forward_channel::Union::Data(d)) => assert_eq!(d.data, b"GET / HTTP/1.0\r\n\r\n".to_vec()),
+                    Some(port_forward_channel::Union::Data(d)) => {
+                        assert_eq!(d.data, b"GET / HTTP/1.0\r\n\r\n".to_vec())
+                    }
                     other => panic!("expected data, got {:?}", other),
                 }
-                peer.send(&opened_msg(id, true, "", CHANNEL_WINDOW)).await.unwrap();
-                peer.send(&data_msg(id, Bytes::from_static(b"HTTP/1.0 200 OK\r\n"))).await.unwrap();
+                peer.send(&opened_msg(id, true, "", CHANNEL_WINDOW))
+                    .await
+                    .unwrap();
+                peer.send(&data_msg(id, Bytes::from_static(b"HTTP/1.0 200 OK\r\n")))
+                    .await
+                    .unwrap();
                 let mut buf = [0u8; 17];
                 app.read_exact(&mut buf).await.unwrap();
                 assert_eq!(&buf, b"HTTP/1.0 200 OK\r\n");
@@ -1348,7 +1442,9 @@ mod tests {
                     Some(port_forward_channel::Union::Open(o)) => o.channel_id,
                     other => panic!("expected open, got {:?}", other),
                 };
-                peer.send(&opened_msg(id, false, "refused", 0)).await.unwrap();
+                peer.send(&opened_msg(id, false, "refused", 0))
+                    .await
+                    .unwrap();
                 let mut buf = [0u8; 1];
                 assert_eq!(app.read(&mut buf).await.unwrap(), 0);
             });
@@ -1456,7 +1552,9 @@ mod tests {
                 assert_eq!(app_a.read(&mut buf).await.unwrap(), 0);
                 assert_eq!(app_b.read(&mut buf).await.unwrap(), 0);
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                assert!(h.open("localhost", 1, local_pair().await.1, vec![]).is_err());
+                assert!(h
+                    .open("localhost", 1, local_pair().await.1, vec![])
+                    .is_err());
                 // The next accept establishes again on the same `Tunnel`.
                 assert!(matches!(t.claim(), Claim::Claimed));
                 let (ours, mut peer) = stream_pair().await;
@@ -1492,7 +1590,13 @@ mod tests {
             }
             fn handle_peer_info(&self, _pi: PeerInfo) {}
             fn set_multiple_windows_session(&self, _sessions: Vec<WindowsSession>) {}
-            async fn handle_hash(&self, _pass: &str, _hash: Hash, _peer: &mut Stream) -> bool {
+            async fn handle_hash(
+                &self,
+                _pass: &str,
+                _hash: Hash,
+                _trust: &mut crate::trusted_devices::client::Session,
+                _peer: &mut Stream,
+            ) -> bool {
                 false
             }
             async fn handle_login_from_ui(
@@ -1501,6 +1605,7 @@ mod tests {
                 _os_password: String,
                 _password: String,
                 _remember: bool,
+                _trust: &mut crate::trusted_devices::client::Session,
                 _peer: &mut Stream,
             ) {
             }
@@ -1552,7 +1657,9 @@ mod tests {
                         let mut buf = vec![0u8; 64 * 1024];
                         loop {
                             let n = s.read(&mut buf).await.unwrap_or(0);
-                            if n == 0 || s.write_all(&buf[..n]).await.is_err() { return; }
+                            if n == 0 || s.write_all(&buf[..n]).await.is_err() {
+                                return;
+                            }
                         }
                     });
                 }
@@ -1721,7 +1828,8 @@ mod tests {
                 let (_t, h, port) = muxed_tunnel().await;
                 for i in 0..(MAX_CHANNELS * 3) {
                     let (mut app, sock) = local_pair().await;
-                    h.open("127.0.0.1", port as i32, sock, vec![i as u8]).unwrap();
+                    h.open("127.0.0.1", port as i32, sock, vec![i as u8])
+                        .unwrap();
                     let mut b = [0u8; 1];
                     app.read_exact(&mut b).await.unwrap();
                     assert_eq!(b[0], i as u8);

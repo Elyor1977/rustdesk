@@ -4680,6 +4680,7 @@ pub async fn handle_hash(
     password_preset: &str,
     hash: Hash,
     interface: &impl Interface,
+    trust: &mut crate::trusted_devices::client::Session,
     peer: &mut Stream,
 ) -> bool {
     lc.write().unwrap().hash = hash.clone();
@@ -4796,7 +4797,19 @@ pub async fn handle_hash(
         hasher.finalize()[..].into()
     };
 
-    send_login(lc.clone(), String::new(), String::new(), password, peer).await;
+    if let Err(error) = send_login(
+        lc.clone(),
+        String::new(),
+        String::new(),
+        password,
+        trust,
+        peer,
+    )
+    .await
+    {
+        interface.on_error(&error.to_string());
+        return false;
+    }
     lc.write().unwrap().hash = hash;
     true
 }
@@ -4840,12 +4853,14 @@ async fn send_login(
     os_username: String,
     os_password: String,
     password: Vec<u8>,
+    trust: &mut crate::trusted_devices::client::Session,
     peer: &mut Stream,
-) {
+) -> ResultType<()> {
     let msg_out = lc
         .read()
         .unwrap()
         .create_login_msg(os_username, os_password, password);
+    let msg_out = trust.login(msg_out).await?;
     hbb_common::throttled_log!(
         Duration::from_secs(1),
         debug,
@@ -4858,7 +4873,7 @@ async fn send_login(
         "[auth-diag] client login_request_send_end ok={}",
         result.is_ok()
     );
-    allow_err!(result);
+    result
 }
 
 /// Handle login request made from ui.
@@ -4877,8 +4892,9 @@ pub async fn handle_login_from_ui(
     os_password: String,
     password: String,
     remember: bool,
+    trust: &mut crate::trusted_devices::client::Session,
     peer: &mut Stream,
-) {
+) -> ResultType<()> {
     let mut hash_password = if password.is_empty() {
         let mut password2 = lc.read().unwrap().password.clone();
         if password2.is_empty() {
@@ -4903,7 +4919,15 @@ pub async fn handle_login_from_ui(
     hasher2.update(&lc.read().unwrap().hash.challenge);
     hash_password = hasher2.finalize()[..].to_vec();
 
-    send_login(lc.clone(), os_username, os_password, hash_password, peer).await;
+    send_login(
+        lc.clone(),
+        os_username,
+        os_password,
+        hash_password,
+        trust,
+        peer,
+    )
+    .await
 }
 
 async fn send_switch_login_request(
@@ -4938,13 +4962,20 @@ pub trait Interface: Send + Clone + 'static + Sized {
     fn on_error(&self, err: &str) {
         self.msgbox("error", "Error", err, "");
     }
-    async fn handle_hash(&self, pass: &str, hash: Hash, peer: &mut Stream) -> bool;
+    async fn handle_hash(
+        &self,
+        pass: &str,
+        hash: Hash,
+        trust: &mut crate::trusted_devices::client::Session,
+        peer: &mut Stream,
+    ) -> bool;
     async fn handle_login_from_ui(
         &self,
         os_username: String,
         os_password: String,
         password: String,
         remember: bool,
+        trust: &mut crate::trusted_devices::client::Session,
         peer: &mut Stream,
     );
     async fn handle_test_delay(&self, t: TestDelay, peer: &mut Stream);
@@ -5908,6 +5939,10 @@ mod webrtc_race_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "client/tests/trusted_devices_tests.rs"]
+mod trusted_devices_tests;
 
 #[cfg(test)]
 mod kx_tests {

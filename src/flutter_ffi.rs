@@ -1,5 +1,3 @@
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::keyboard::input_source::{change_input_source, get_cur_session_input_source};
 #[cfg(target_os = "linux")]
 use crate::platform::linux::is_x11;
 use crate::{
@@ -10,6 +8,11 @@ use crate::{
     },
     input::*,
     ui_interface::{self, *},
+};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::{
+    keyboard::input_source::{change_input_source, get_cur_session_input_source},
+    trusted_devices::authority,
 };
 use base::{config::keys, fs};
 use flutter_rust_bridge::{StreamSink, SyncReturn};
@@ -57,7 +60,7 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
                 .with_tag("ffi"), // logs will show under mytag tag
         );
         #[cfg(not(debug_assertions))]
-        hbb_common::init_log(false, "");
+        crate::platform::android_log::initialize();
         #[cfg(feature = "mediacodec")]
         scrap::mediacodec::check_mediacodec();
         crate::common::test_rendezvous_server();
@@ -851,6 +854,13 @@ pub fn session_read_local_dir_sync(
     path: String,
     show_hidden: bool,
 ) -> String {
+    #[cfg(target_os = "android")]
+    if fs::android::is_path(&fs::get_path(&path)) {
+        return match fs::read_dir(&fs::get_path(&path), show_hidden) {
+            Ok(fd) => make_fd_to_json(fd.id, path, &fd.entries),
+            Err(error) => serde_json::json!({"error": error.to_string()}).to_string(),
+        };
+    }
     if let Ok(fd) = fs::read_dir(&fs::get_path(&path), show_hidden) {
         return make_fd_to_json(fd.id, path, &fd.entries);
     }
@@ -1006,7 +1016,13 @@ pub fn main_get_error() -> String {
     get_error()
 }
 
-pub fn main_set_option(key: String, value: String) {
+pub fn main_set_option(key: String, value: String) -> hbb_common::anyhow::Result<()> {
+    if key == "2fa"
+        || key == keys::OPTION_ENABLE_TRUSTED_DEVICES
+        || key == keys::OPTION_TRUSTED_DEVICE_EXPIRATION
+    {
+        return set_auth_option(key, value);
+    }
     #[cfg(target_os = "android")]
     {
         let is_permission_option = key.eq(keys::OPTION_ENABLE_CLIPBOARD)
@@ -1025,7 +1041,7 @@ pub fn main_set_option(key: String, value: String) {
                 key,
                 value
             );
-            return;
+            return Ok(());
         }
     }
     #[cfg(target_os = "android")]
@@ -1064,6 +1080,7 @@ pub fn main_set_option(key: String, value: String) {
     } else {
         set_option(key, value.clone());
     }
+    Ok(())
 }
 
 pub fn main_get_options() -> String {
@@ -1074,7 +1091,7 @@ pub fn main_get_options_sync() -> SyncReturn<String> {
     SyncReturn(get_options())
 }
 
-pub fn main_set_options(json: String) {
+pub fn main_set_options(json: String) -> hbb_common::anyhow::Result<()> {
     let mut map: HashMap<String, String> = serde_json::from_str(&json).unwrap_or(HashMap::new());
     #[cfg(target_os = "android")]
     {
@@ -1099,8 +1116,9 @@ pub fn main_set_options(json: String) {
         }
     }
     if !map.is_empty() {
-        set_options(map)
+        try_set_options(map)?;
     }
+    Ok(())
 }
 
 pub fn main_test_if_valid_server(server: String, test_with_proxy: bool) -> String {
@@ -1451,6 +1469,17 @@ pub fn main_peer_exists(id: String) -> bool {
     peer_exists(&id)
 }
 
+// `Config::path` resolves through `APP_DIR` only on mobile, where loading peers before it is set
+// would read the wrong place. Elsewhere the peer path never consults it, so an unset `APP_DIR`
+// must not stop the peers from loading.
+fn peer_config_path_ready() -> bool {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        !config::APP_DIR.read().unwrap().is_empty()
+    } else {
+        true
+    }
+}
+
 fn load_recent_peers(
     vec_id_modified_time_path: &Vec<(String, SystemTime, std::path::PathBuf)>,
     to_end: bool,
@@ -1482,7 +1511,7 @@ pub fn main_load_recent_peers() {
         );
     };
 
-    if !config::APP_DIR.read().unwrap().is_empty() {
+    if peer_config_path_ready() {
         let vec_id_modified_time_path = PeerConfig::get_vec_id_modified_time_path(&None);
         if vec_id_modified_time_path.is_empty() {
             push_to_flutter("".to_owned(), None);
@@ -1530,7 +1559,7 @@ pub fn main_load_recent_peers_for_ab(filter: String) -> String {
     } else {
         Some(id_filters)
     };
-    if !config::APP_DIR.read().unwrap().is_empty() {
+    if peer_config_path_ready() {
         let peers: Vec<HashMap<&str, String>> = PeerConfig::peers(id_filters)
             .drain(..)
             .map(|(id, _, p)| peer_to_map(id, p))
@@ -1548,7 +1577,7 @@ pub fn main_load_fav_peers() {
             serde_json::ser::to_string(&data).unwrap_or("".to_owned()),
         );
     };
-    if !config::APP_DIR.read().unwrap().is_empty() {
+    if peer_config_path_ready() {
         let favs = get_fav();
         let mut recent = PeerConfig::peers(Some(favs.clone()));
         let mut lan = config::LanPeers::load()
@@ -2648,16 +2677,54 @@ pub fn main_check_hwcodec() {
     check_hwcodec()
 }
 
-pub fn main_get_trusted_devices() -> String {
-    get_trusted_devices()
+// The bridge uses ordinary worker threads; desktop IPC needs a runtime at this boundary.
+pub fn main_get_trusted_devices() -> hbb_common::anyhow::Result<String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return crate::trusted_devices::devices();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    hbb_common::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(crate::ipc::trusted_devices(authority::Request::List))
 }
 
-pub fn main_remove_trusted_devices(json: String) {
-    remove_trusted_devices(&json)
+pub fn main_remove_trusted_devices(json: String) -> hbb_common::anyhow::Result<()> {
+    let record_ids = serde_json::from_str::<Vec<[u8; crate::trusted_devices::TOKEN_BYTES]>>(&json)?;
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return crate::trusted_devices::remove(&record_ids);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    hbb_common::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(crate::ipc::trusted_devices(authority::Request::Remove(
+            record_ids,
+        )))
+        .map(|_| ())
 }
 
-pub fn main_clear_trusted_devices() {
-    clear_trusted_devices()
+pub fn main_renew_trusted_devices(json: String) -> hbb_common::anyhow::Result<()> {
+    let record_ids = serde_json::from_str::<Vec<[u8; crate::trusted_devices::TOKEN_BYTES]>>(&json)?;
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return crate::trusted_devices::renew(&record_ids);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    hbb_common::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(crate::ipc::trusted_devices(authority::Request::Renew(
+            record_ids,
+        )))
+        .map(|_| ())
+}
+
+pub fn main_clear_trusted_devices() -> hbb_common::anyhow::Result<()> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return crate::trusted_devices::clear();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    hbb_common::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(crate::ipc::trusted_devices(authority::Request::Clear))
+        .map(|_| ())
 }
 
 pub fn main_max_encrypt_len() -> SyncReturn<usize> {
@@ -3019,6 +3086,8 @@ pub mod server_side {
         if let Ok(home_dir) = env.get_string(&home_dir) {
             *config::APP_HOME_DIR.write().unwrap() = home_dir.into();
         }
+        #[cfg(not(debug_assertions))]
+        crate::platform::android_log::initialize();
         if let Ok(custom_client_config) = env.get_string(&custom_client_config) {
             if !custom_client_config.is_empty() {
                 let custom_client_config: String = custom_client_config.into();
