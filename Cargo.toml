@@ -213,7 +213,7 @@ jni = "0.21"
 android-wakelock = { git = "https://github.com/rustdesk-org/android-wakelock", rev = "d0292e5a367e627c4fa6f1ca6bdfad005dca7d90" }
 
 [workspace]
-members = ["libs/scrap", "libs/hbb_common", "libs/base", "libs/enigo", "libs/clipboard", "libs/virtual_display", "libs/virtual_display/dylib", "libs/portable", "libs/remote_printer", "libs/webrtc-dtls"]
+members = ["libs/scrap", "libs/hbb_common", "libs/base", "libs/enigo", "libs/clipboard", "libs/virtual_display", "libs/virtual_display/dylib", "libs/portable", "libs/remote_printer", "libs/webrtc-dtls", "libs/zstd-compat"]
 exclude = ["vdi/host"]
 
 # Patch libxdo-sys to use a stub implementation that doesn't require libxdo
@@ -224,6 +224,8 @@ exclude = ["vdi/host"]
 # dependency above and the code using it stay unchanged and the binary still starts when libxdo is
 # absent. Remove this patch if the dependency is ever dropped or replaced upstream.
 [patch.crates-io]
+# Preserve hbb_common's 0.13.1 API requirement without retaining its old implementation.
+zstd = { path = "libs/zstd-compat" }
 libxdo-sys = { path = "libs/libxdo-sys-stub" }
 # Upstream reserves a frame's whole declared length as soon as its header is in, so a header alone
 # buys an allocation the size it names, bounded only by max_frame_size. This fork grows the read

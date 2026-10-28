@@ -1,0 +1,28 @@
+[package]
+name = "zstd"
+version = "0.13.1+rustdesk.1"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+license = "AGPL-3.0-only"
+description = "Compatibility re-export of patched zstd for existing 0.13 consumers"
+
+[dependencies]
+zstd-upstream = { package = "zstd", version = "=0.14.3", default-features = false }
+
+[features]
+default = ["legacy", "arrays", "zdict_builder"]
+arrays = ["zstd-upstream/arrays"]
+bindgen = ["zstd-upstream/bindgen"]
+debug = ["zstd-upstream/debug"]
+doc-cfg = ["zstd-upstream/doc-cfg"]
+experimental = ["zstd-upstream/experimental"]
+fat-lto = ["zstd-upstream/fat-lto"]
+legacy = ["zstd-upstream/legacy"]
+no_asm = ["zstd-upstream/no_asm"]
+pkg-config = ["zstd-upstream/pkg-config"]
+thin = ["zstd-upstream/thin"]
+thin-lto = ["zstd-upstream/thin-lto"]
+wasm = ["zstd-upstream/wasm"]
+zdict_builder = ["zstd-upstream/zdict_builder"]
+zstdmt = ["zstd-upstream/zstdmt"]
