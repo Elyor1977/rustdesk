@@ -833,7 +833,20 @@ mod login_tests {
             // The prompt's password reached B before its hash, and no other
             // mapping has stored it in the handler yet.
             let typed = (String::new(), String::new(), "pw".to_owned(), false);
-            assert!(hash_arrived(&ui, "", hash("b"), Some(typed), "b", 2, false, &mut b).await);
+            assert!(
+                hash_arrived(
+                    &ui,
+                    "",
+                    hash("b"),
+                    Some(typed),
+                    "b",
+                    2,
+                    false,
+                    &mut Default::default(),
+                    &mut b,
+                )
+                .await
+            );
             let lr = login_at(&mut b_peer).await;
             assert_eq!(lr.password, digest("b"));
             assert_eq!(target(&lr), ("b".to_owned(), 2));
@@ -853,7 +866,19 @@ mod login_tests {
             // upgraded peer answers with a tunnel it then never gets.
             ui.lc.write().unwrap().port_forward_mux = true;
             let (mut a, mut a_peer) = loopback().await;
-            assert!(login_with_hash(&ui, "pw", hash("a"), "a", 1, false, &mut a).await);
+            assert!(
+                login_with_hash(
+                    &ui,
+                    "pw",
+                    hash("a"),
+                    "a",
+                    1,
+                    false,
+                    &mut Default::default(),
+                    &mut a,
+                )
+                .await
+            );
             assert!(!login_at(&mut a_peer).await.port_forward().multiplex);
         });
     }
@@ -869,7 +894,17 @@ mod login_tests {
             ui.lc.write().unwrap().port_forward_mux = true;
             let (mut b, mut b_peer) = loopback().await;
             let typed = (String::new(), String::new(), "pw".to_owned(), false);
-            login_from_ui(&ui, &hash("b"), typed, "b", 2, false, &mut b).await;
+            login_from_ui(
+                &ui,
+                &hash("b"),
+                typed,
+                "b",
+                2,
+                false,
+                &mut Default::default(),
+                &mut b,
+            )
+            .await;
             assert!(!login_at(&mut b_peer).await.port_forward().multiplex);
         });
     }
