@@ -930,12 +930,10 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
-    fn test_should_allow_everyone_create_on_windows_policy() {
-        assert!(super::should_allow_everyone_create_on_windows(""));
-        assert!(super::should_allow_everyone_create_on_windows("_service"));
-        assert!(!super::should_allow_everyone_create_on_windows(
-            "_portable_service"
-        ));
+    fn test_is_windows_main_or_service_ipc_policy() {
+        assert!(super::is_windows_main_or_service_ipc(""));
+        assert!(super::is_windows_main_or_service_ipc("_service"));
+        assert!(!super::is_windows_main_or_service_ipc("_portable_service"));
     }
 
     #[test]
