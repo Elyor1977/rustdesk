@@ -7322,8 +7322,8 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
 fn ip_whitelist_entries(option: &str) -> Vec<String> {
     option
         .split(',')
-        .map(|x| x.trim().to_owned())
         .filter(|x| !x.is_empty())
+        .map(|x| x.trim().to_owned())
         .collect()
 }
 
@@ -7367,11 +7367,15 @@ mod test {
     }
 
     #[test]
-    fn test_ip_whitelist_entries_whitespace_only_is_off() {
-        for option in ["", ",", " ", " , "] {
+    fn test_ip_whitelist_whitespace_does_not_disable_filtering() {
+        for option in ["", ","] {
             assert!(ip_whitelist_entries(option).is_empty(), "{option:?}");
         }
-        assert_eq!(ip_whitelist_entries("10.0.0.1, "), vec!["10.0.0.1"]);
+        for option in [" ", " , "] {
+            let entries = ip_whitelist_entries(option);
+            assert!(!entries.is_empty(), "{option:?}");
+            assert!(entries.iter().all(|entry| IpCidr::from_str(entry).is_err()));
+        }
     }
 
     #[test]
