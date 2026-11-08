@@ -1770,9 +1770,10 @@ impl Drop for CheckIfResendPk {
 #[cfg(test)]
 mod tests {
     use super::{
-        connection_meta, mpsc, socket_client, tokio, udp_nat_listen, AnswererSlot, Arc, IceRoute,
-        Instant, IntoTargetAddr, Ordering, PunchHoleSent, RendezvousMediator, RendezvousMessage,
-        ICE_DEDUP_WINDOW, MAX_PENDING_REMOTE_ICE, MAX_WEBRTC_ANSWERERS, TCP_PUNCHES, UDP_PUNCHES,
+        connection_meta, mpsc, socket_client, tokio, udp_nat_listen, AnswererSlot, Arc, Duration,
+        IceRoute, Instant, IntoTargetAddr, Ordering, PunchHoleSent, RendezvousMediator,
+        RendezvousMessage, ICE_DEDUP_WINDOW, MAX_PENDING_REMOTE_ICE, MAX_WEBRTC_ANSWERERS,
+        TCP_PUNCHES, UDP_PUNCHES,
     };
     use hbb_common::{protobuf::Message as _, tcp::new_listener};
     use std::net::SocketAddr;
