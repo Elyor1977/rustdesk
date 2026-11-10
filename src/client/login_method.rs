@@ -59,6 +59,7 @@ mod tests {
 
     #[test]
     fn session_creation_initializes_login_method() {
+        crate::trusted_devices::tests::initialize_config();
         let remote_id = hbb_common::config::LocalConfig::get_remote_id();
         for method in ["", "request-approval"] {
             let session_id = uuid::Uuid::new_v4();
@@ -99,11 +100,11 @@ mod tests {
             assert!(monitor_result.0.is_empty(), "{}", monitor_result.0);
             assert_eq!(methods, [Some(method.to_owned()), Some(method.to_owned())]);
             let session = session.unwrap();
-            let request = session
-                .lc
-                .read()
-                .unwrap()
-                .create_login_msg(String::new(), String::new(), vec![1; 32]);
+            let request = session.lc.read().unwrap().create_login_msg(
+                String::new(),
+                String::new(),
+                vec![1; 32],
+            );
             assert_eq!(
                 request.login_request().password.is_empty(),
                 method == "request-approval"
@@ -113,6 +114,7 @@ mod tests {
 
     #[tokio::test]
     async fn configured_passwords_are_skipped_only_for_the_selected_connection() {
+        crate::trusted_devices::tests::initialize_config();
         for conn_type in [
             ConnType::DEFAULT_CONN,
             ConnType::FILE_TRANSFER,
@@ -162,6 +164,7 @@ mod tests {
 
     #[tokio::test]
     async fn admin_terminal_waits_for_os_credentials_before_requesting_approval() {
+        crate::trusted_devices::tests::initialize_config();
         let session = Session::<FlutterHandler>::default();
         {
             let mut lc = session.lc.write().unwrap();
@@ -204,6 +207,7 @@ mod tests {
 
     #[test]
     fn request_approval_does_not_save_personal_ab_password() {
+        crate::trusted_devices::tests::initialize_config();
         for request_approval in [false, true] {
             let mut lc = client::LoginConfigHandler::default();
             lc.id = format!("request-approval-ab-password-test-{}", uuid::Uuid::new_v4());
@@ -228,6 +232,7 @@ mod tests {
 
     #[tokio::test]
     async fn request_approval_preserves_saved_password() {
+        crate::trusted_devices::tests::initialize_config();
         let (mut stream, mut peer) = connection().await;
         let id = format!("skip-saved-password-test-{}", uuid::Uuid::new_v4());
         let mut config = PeerConfig::default();
