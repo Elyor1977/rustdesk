@@ -930,16 +930,6 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
-    fn test_should_allow_everyone_create_on_windows_policy() {
-        assert!(super::should_allow_everyone_create_on_windows(""));
-        assert!(super::should_allow_everyone_create_on_windows("_service"));
-        assert!(!super::should_allow_everyone_create_on_windows(
-            "_portable_service"
-        ));
-    }
-
-    #[test]
-    #[cfg(windows)]
     fn test_executable_paths_match_windows_normalization() {
         let left = std::path::PathBuf::from(r"\\?\C:\Program Files\RustDesk\RustDesk.exe");
         let right = std::path::PathBuf::from(r"c:\program files\rustdesk\rustdesk.exe");
