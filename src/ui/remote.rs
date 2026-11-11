@@ -616,11 +616,16 @@ impl SciterSession {
             ConnType::DEFAULT_CONN
         };
 
-        session
-            .lc
-            .write()
-            .unwrap()
-            .initialize(id, conn_type, None, force_relay, None, None, None, "");
+        session.lc.write().unwrap().initialize(
+            id,
+            conn_type,
+            None,
+            force_relay,
+            None,
+            None,
+            None,
+            "",
+        );
 
         Self(session)
     }
