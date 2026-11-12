@@ -3,13 +3,16 @@ use crate::port_forward_mux::{
     charge, close_msg, effective_window, opened_msg, run_channel, FrameSink, Inbound, RecvWindow,
     SendCredit, CHANNEL_WINDOW, INITIAL_WINDOW, MAX_CHANNELS,
 };
+use base::message_proto::*;
 use hbb_common::{
     bytes::Bytes,
-    log,
-    timeout,
-    tokio::{self, net::TcpStream, sync::{mpsc, watch}},
+    log, timeout,
+    tokio::{
+        self,
+        net::TcpStream,
+        sync::{mpsc, watch},
+    },
 };
-use base::message_proto::*;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -96,7 +99,10 @@ impl PortForwardMux {
                 }
             }
             Some(port_forward_channel::Union::Opened(o)) => {
-                log::debug!("ignoring opened for channel {} on the controlled side", o.channel_id);
+                log::debug!(
+                    "ignoring opened for channel {} on the controlled side",
+                    o.channel_id
+                );
             }
             _ => {}
         }
@@ -132,7 +138,12 @@ impl PortForwardMux {
                 addr,
                 self.login_target
             );
-            self.reply(opened_msg(id, false, "Port forward target not authorized", 0));
+            self.reply(opened_msg(
+                id,
+                false,
+                "Port forward target not authorized",
+                0,
+            ));
             return;
         }
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
@@ -171,7 +182,9 @@ impl PortForwardMux {
 
     #[cfg(test)]
     pub fn recv_window_remaining(&self, id: i32) -> Option<u32> {
-        self.channels.get(&id).map(|e| e.window.lock().unwrap().remaining())
+        self.channels
+            .get(&id)
+            .map(|e| e.window.lock().unwrap().remaining())
     }
 
     /// Every task ends and drops its target socket: the queue's senders go for
@@ -236,7 +249,10 @@ async fn run_controlled_channel(
         }
     };
     // Granted before `opened` leaves, so the peer can never be ahead of it.
-    window.lock().unwrap().grant(CHANNEL_WINDOW - INITIAL_WINDOW);
+    window
+        .lock()
+        .unwrap()
+        .grant(CHANNEL_WINDOW - INITIAL_WINDOW);
     if sink
         .send_ordered(opened_msg(id, true, "", CHANNEL_WINDOW))
         .await
@@ -245,7 +261,19 @@ async fn run_controlled_channel(
         return;
     }
     let (reader, writer) = socket.into_split();
-    run_channel(id, reader, writer, Vec::new(), pending, credit, window, inbound, sink, teardown).await;
+    run_channel(
+        id,
+        reader,
+        writer,
+        Vec::new(),
+        pending,
+        credit,
+        window,
+        inbound,
+        sink,
+        teardown,
+    )
+    .await;
 }
 
 /// The same words the raw pipe puts in its login error, so one problem reads
@@ -261,16 +289,14 @@ fn unreachable_message(addr: &str, is_rdp: bool) -> String {
 mod tests {
     use super::*;
     use crate::port_forward_mux::{CHANNEL_WINDOW, INITIAL_WINDOW, MAX_CHANNELS, MIN_FRAME_CHARGE};
-    use hbb_common::{
-        tokio::{
-            self,
-            io::{AsyncReadExt, AsyncWriteExt},
-            net::TcpListener,
-            sync::mpsc,
-            time::Instant,
-        },
-    };
     use base::message_proto::{message, port_forward_channel};
+    use hbb_common::tokio::{
+        self,
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::mpsc,
+        time::Instant,
+    };
 
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
@@ -324,11 +350,16 @@ mod tests {
 
     fn close(id: i32) -> PortForwardChannel {
         let mut ch = PortForwardChannel::new();
-        ch.set_close(PortForwardClose { channel_id: id, ..Default::default() });
+        ch.set_close(PortForwardClose {
+            channel_id: id,
+            ..Default::default()
+        });
         ch
     }
 
-    async fn next_frame(rx: &mut mpsc::UnboundedReceiver<(Instant, Arc<Message>)>) -> PortForwardChannel {
+    async fn next_frame(
+        rx: &mut mpsc::UnboundedReceiver<(Instant, Arc<Message>)>,
+    ) -> PortForwardChannel {
         let (_, m) = rx.recv().await.unwrap();
         match &m.union {
             Some(message::Union::PortForwardChannel(ch)) => ch.clone(),
@@ -375,7 +406,11 @@ mod tests {
             mux.handle(open(1, port), || true);
             mux.handle(data(1, b"lost"), || true);
             assert_eq!(opened(&next_frame(&mut rx).await), (1, false));
-            assert!(tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await.is_err());
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv())
+                    .await
+                    .is_err()
+            );
         });
     }
 
@@ -404,7 +439,10 @@ mod tests {
             mux.handle(open(2, port), || false);
             assert_eq!(opened(&next_frame(&mut rx).await), (2, false));
             mux.handle(data(1, b"still relayed"), || false);
-            assert_eq!(data_of(&next_frame(&mut rx).await), (1, b"still relayed".to_vec()));
+            assert_eq!(
+                data_of(&next_frame(&mut rx).await),
+                (1, b"still relayed".to_vec())
+            );
             assert_eq!(mux.live_channels(), 1);
         });
     }
@@ -420,7 +458,11 @@ mod tests {
             let mut mux = PortForwardMux::new(tx, format!("127.0.0.1:{}", port));
             mux.handle(open(1, port), || true);
             mux.handle(close(1), || true);
-            assert!(tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await.is_err());
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
+                    .await
+                    .is_err()
+            );
             assert_eq!(mux.live_channels(), 0);
         });
     }
@@ -446,7 +488,10 @@ mod tests {
                 other => panic!("expected close, got {:?}", other),
             }
             mux.handle(data(2, b"still fine"), || true);
-            assert_eq!(data_of(&next_frame(&mut rx).await), (2, b"still fine".to_vec()));
+            assert_eq!(
+                data_of(&next_frame(&mut rx).await),
+                (2, b"still fine".to_vec())
+            );
         });
     }
 

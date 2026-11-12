@@ -182,12 +182,7 @@ fn expected_stream(qos: &VideoQoS) -> u32 {
     {
         fps = fps.min(INIT_FPS);
     }
-    let cap = qos
-        .users
-        .values()
-        .map(|u| u.fps_cap())
-        .min()
-        .unwrap_or(FPS);
+    let cap = qos.users.values().map(|u| u.fps_cap()).min().unwrap_or(FPS);
     fps.clamp(MIN_FPS, cap)
 }
 
@@ -206,15 +201,18 @@ fn bad_evidence_never_raises_a_target_or_the_ratio() {
                 let step = driver.step();
                 let ratio_before = qos.ratio();
                 let before = match step {
-                    Step::Reply { id, .. } | Step::Timeout { id, .. } => Some((id, target(&qos, id))),
+                    Step::Reply { id, .. } | Step::Timeout { id, .. } => {
+                        Some((id, target(&qos, id)))
+                    }
                     _ => None,
                 };
                 apply(&mut qos, step);
                 // Bad by the baseline the controller used for this reply: the reply
                 // itself may have relearned it.
                 let bad = match step {
-                    Step::Reply { id, delay } => baseline(&qos, id)
-                        .is_some_and(|base| delay >= base + DELAY_THRESHOLD_150MS),
+                    Step::Reply { id, delay } => {
+                        baseline(&qos, id).is_some_and(|base| delay >= base + DELAY_THRESHOLD_150MS)
+                    }
                     Step::Timeout { .. } => true,
                     _ => false,
                 };
@@ -390,7 +388,12 @@ fn joins_and_leaves_only_change_the_aggregation() {
                     let leaving = present.remove(driver.rng.below(present.len() as u64) as usize);
                     driver.ids.retain(|id| *id != leaving);
                     driver.outstanding.remove(&leaving);
-                    let others: Vec<i32> = qos.users.keys().copied().filter(|id| *id != leaving).collect();
+                    let others: Vec<i32> = qos
+                        .users
+                        .keys()
+                        .copied()
+                        .filter(|id| *id != leaving)
+                        .collect();
                     let before: Vec<String> = others.iter().map(|id| snapshot(&qos, *id)).collect();
                     qos.on_connection_close(leaving);
                     let after: Vec<String> = others.iter().map(|id| snapshot(&qos, *id)).collect();
@@ -457,7 +460,10 @@ fn a_bitrate_cut_is_owned_by_a_viewers_evidence() {
             qos.on_connection_close(99);
         }
     }
-    assert!(cuts > SEEDS as usize, "only {cuts} cuts across {SEEDS} sessions");
+    assert!(
+        cuts > SEEDS as usize,
+        "only {cuts} cuts across {SEEDS} sessions"
+    );
 }
 
 // Invariant 5: a reply leaves the target within its cap, and the stream is the
