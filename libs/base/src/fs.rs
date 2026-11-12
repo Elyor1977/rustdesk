@@ -814,6 +814,50 @@ impl TransferJob {
         }
     }
 
+    pub async fn finish_upload(&self) -> ResultType<()> {
+        #[cfg(any(target_os = "android", all(test, unix)))]
+        if self.is_document() {
+            return Ok(());
+        }
+        if self.is_download() || self.r#type == JobType::Printer {
+            return Ok(());
+        }
+        if let Some(err) = self.write_error.as_ref() {
+            bail!("Cannot finish failed upload: {err}");
+        }
+        if let Some((file_num, err)) = self.resume_error.as_ref() {
+            if *file_num == self.file_num as usize {
+                bail!("Failed to resume file: {err}");
+            }
+        }
+        let (DataSource::FilePath(base), Some(DataStream::FileStream(file))) =
+            (&self.data_source, &self.data_stream)
+        else {
+            return Ok(());
+        };
+        let entry = self
+            .files
+            .get(self.file_num as usize)
+            .ok_or_else(|| anyhow!("Wrong file number"))?;
+        let path = self
+            .resolve_entry_path(base, &entry.name)
+            .ok_or_else(|| anyhow!("Invalid path"))?;
+        let download_path = format!("{}.download", get_string(&path));
+        let digest_path = format!("{}.digest", get_string(&path));
+        file.sync_all().await?;
+        filetime::set_file_mtime(
+            &download_path,
+            filetime::FileTime::from_unix_time(entry.modified_time as _, 0),
+        )?;
+        std::fs::rename(download_path, path)?;
+        match std::fs::remove_file(digest_path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+        Ok(())
+    }
+
     pub fn modify_time(&self) {
         #[cfg(any(target_os = "android", all(test, unix)))]
         if self.is_document() {
@@ -926,9 +970,12 @@ impl TransferJob {
                     bail!("Wrong file number");
                 }
                 if file_num != self.file_num as usize || self.data_stream.is_none() {
-                    self.modify_time();
-                    if let Some(DataStream::FileStream(file)) = self.data_stream.as_mut() {
-                        file.sync_all().await?;
+                    if self.r#type == JobType::Printer {
+                        if let Some(DataStream::FileStream(file)) = self.data_stream.as_mut() {
+                            file.sync_all().await?;
+                        }
+                    } else {
+                        self.finish_upload().await?;
                     }
                     self.file_num = block.file_num;
                     let entry = &self.files[file_num];
@@ -1894,6 +1941,87 @@ mod tests {
             .expect_err("failed job must refuse later blocks");
         assert_err_contains(second, "Job already failed: Wrong id");
         assert_eq!(job.job_error().as_deref(), Some("Wrong id"));
+    }
+
+    #[tokio::test]
+    async fn upload_finalization_preserves_original_after_write_error() {
+        let dir = TestTempDir::new("rustdesk_failed_upload");
+        std::fs::create_dir_all(&dir.path).unwrap();
+        let target = dir.join("file.txt");
+        std::fs::write(&target, b"original").unwrap();
+        let mut job = TransferJob::new_write(
+            1,
+            JobType::Generic,
+            String::new(),
+            DataSource::FilePath(target.clone()),
+            0,
+            false,
+            false,
+            true,
+        )
+        .with_files(vec![FileEntry::default()])
+        .unwrap();
+        job.write(FileTransferBlock {
+            id: 1,
+            file_num: 0,
+            data: b"partial".to_vec().into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert!(job
+            .write(FileTransferBlock {
+                id: 1,
+                file_num: 1,
+                ..Default::default()
+            })
+            .await
+            .is_err());
+
+        let result = job.finish_upload().await;
+        assert_eq!(std::fs::read(&target).unwrap(), b"original");
+        assert!(dir.join("file.txt.digest").exists());
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn upload_finalization_reports_rename_failure_and_keeps_resume_metadata() {
+        let dir = TestTempDir::new("rustdesk_upload_rename");
+        std::fs::create_dir_all(&dir.path).unwrap();
+        let target = dir.join("file.txt");
+        let mut job = TransferJob::new_write(
+            2,
+            JobType::Generic,
+            String::new(),
+            DataSource::FilePath(target.clone()),
+            0,
+            false,
+            false,
+            true,
+        )
+        .with_files(vec![FileEntry::default()])
+        .unwrap();
+        job.write(FileTransferBlock {
+            id: 2,
+            file_num: 0,
+            data: b"received".to_vec().into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        // A directory occupying the destination makes rename fail on every platform.
+        std::fs::create_dir(&target).unwrap();
+
+        assert!(job.finish_upload().await.is_err());
+        assert!(target.is_dir());
+        assert!(dir.join("file.txt.download").exists());
+        assert!(dir.join("file.txt.digest").exists());
+
+        std::fs::remove_dir(&target).unwrap();
+        job.finish_upload().await.unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"received");
+        assert!(!dir.join("file.txt.download").exists());
+        assert!(!dir.join("file.txt.digest").exists());
     }
 
     #[tokio::test]

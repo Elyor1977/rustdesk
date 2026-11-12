@@ -1136,7 +1136,12 @@ async fn handle_fs(
                     send_raw(fs::new_error(id, error, file_num), tx);
                     return;
                 }
-                job.modify_time();
+                if let Err(error) = job.finish_upload().await {
+                    let error = error.to_string();
+                    tx_log.map(|tx| tx.send(serialize_transfer_job(&job, false, false, &error)));
+                    send_raw(fs::new_error(id, error, file_num), tx);
+                    return;
+                }
                 send_raw(fs::new_done(id, file_num), tx);
                 tx_log.map(|tx| tx.send(serialize_transfer_job(&job, true, false, "")));
             }
