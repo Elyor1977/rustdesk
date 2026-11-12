@@ -2918,7 +2918,10 @@ impl Drop for SessionIdleInhibit {
     }
 }
 
-struct SystemInhibit(std::process::Child);
+struct SystemInhibit {
+    // logind releases the lock when this fd closes, even if RustDesk exits abruptly.
+    _fd: dbus::arg::OwnedFd,
+}
 
 impl SystemInhibit {
     fn new(idle: bool, sleep: bool) -> Option<Self> {
@@ -2928,41 +2931,52 @@ impl SystemInhibit {
             (false, true) => "sleep",
             (false, false) => return None,
         };
-        match std::process::Command::new("systemd-inhibit")
-            .args([
-                "--what",
-                what,
-                "--who",
-                "RustDesk",
-                "--why",
-                "Remote desktop session",
-                "--mode",
-                "block",
-                "sleep",
-                "infinity",
-            ])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            Ok(child) => Some(Self(child)),
+        let result: Result<(dbus::arg::OwnedFd,), dbus::Error> =
+            dbus::blocking::Connection::new_system().and_then(|conn| {
+                conn.with_proxy(
+                    "org.freedesktop.login1",
+                    "/org/freedesktop/login1",
+                    Duration::from_secs(3),
+                )
+                .method_call(
+                    "org.freedesktop.login1.Manager",
+                    "Inhibit",
+                    (what, "RustDesk", "Remote desktop session", "block"),
+                )
+            });
+        match result {
+            Ok((fd,)) => Some(Self { _fd: fd }),
             Err(err) => {
-                log::info!("wakelock: systemd-inhibit is unavailable ({err})");
+                log::info!("wakelock: logind inhibitor is unavailable ({err})");
                 None
             }
         }
     }
 }
 
-impl Drop for SystemInhibit {
-    fn drop(&mut self) {
-        if let Err(err) = self.0.kill() {
-            log::debug!("wakelock: failed to stop systemd-inhibit ({err})");
-        }
-        if let Err(err) = self.0.wait() {
-            log::debug!("wakelock: failed to reap systemd-inhibit ({err})");
-        }
+#[cfg(test)]
+mod system_inhibit_tests {
+    use super::SystemInhibit;
+    use std::{
+        io::Read,
+        os::unix::{
+            io::{FromRawFd, IntoRawFd},
+            net::UnixStream,
+        },
+        time::Duration,
+    };
+
+    #[test]
+    fn dropping_inhibitor_closes_its_descriptor() {
+        let (mut observer, held) = UnixStream::pair().unwrap();
+        observer
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let inhibitor = SystemInhibit {
+            _fd: unsafe { dbus::arg::OwnedFd::from_raw_fd(held.into_raw_fd()) },
+        };
+        drop(inhibitor);
+        assert_eq!(observer.read(&mut [0u8]).unwrap(), 0);
     }
 }
 
