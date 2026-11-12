@@ -5919,7 +5919,7 @@ mod webrtc_race_tests {
         assert!(start.elapsed() < Duration::from_secs(5));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn both_failing_report_last_error() {
         let err = race_transports_prefer_webrtc(
             err_after(10, "webrtc dead"),
