@@ -75,3 +75,18 @@ Signed workflows wait for approval from the `release` environment. Unsigned work
 Manual signed builds also run the checks first. Windows, Windows 7 and Android
 use separate bridge artifacts; signed and unsigned runs have distinct
 concurrency groups, so one cannot cancel the other.
+
+## Validation before signing
+
+Signed Windows and Android jobs check their certificate/keystore fingerprint
+before compiling native dependencies. Preflight signing material is removed
+immediately; the final signing steps still verify every produced signature.
+Android CI passes signing passwords directly through environment variables,
+without writing `key.properties`; local builds can continue using that file.
+
+The normal x64 Windows job runs the release-feature Rust tests and the base,
+clipboard and DTLS tests before signing. Windows 7 keeps its separate
+`build-std` compilation/import checks; this is not a Windows 7 runtime test.
+
+The legacy manual `Flutter Nightly Build` and `playground` entries only save
+unsigned artifacts. They cannot use release-signing secrets or publish releases.

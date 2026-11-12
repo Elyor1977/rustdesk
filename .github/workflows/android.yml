@@ -30,6 +30,12 @@ on:
   pull_request:
     paths:
       - ".github/workflows/android.yml"
+      - ".github/workflows/bridge.yml"
+      - ".github/patches/**"
+      - ".cargo/**"
+      - "build.rs"
+      - "vcpkg.json"
+      - "res/vcpkg/**"
       - "Cargo.lock"
       - "Cargo.toml"
       - "build.py"
@@ -40,6 +46,12 @@ on:
     branches: [master]
     paths:
       - ".github/workflows/android.yml"
+      - ".github/workflows/bridge.yml"
+      - ".github/patches/**"
+      - ".cargo/**"
+      - "build.rs"
+      - "vcpkg.json"
+      - "res/vcpkg/**"
       - "Cargo.lock"
       - "Cargo.toml"
       - "build.py"
@@ -67,6 +79,7 @@ jobs:
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
     with:
+      include-modern: false
       artifact-suffix: -android
 
   build-android:
@@ -120,6 +133,32 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           submodules: recursive
+
+      - name: Validate Android signing configuration
+        if: env.skip != '1' && inputs.release
+        shell: bash
+        env:
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          ANDROID_ALIAS: ${{ secrets.ANDROID_ALIAS }}
+          ANDROID_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          keystore=$(mktemp "$RUNNER_TEMP/android-signing-XXXXXX.jks")
+          trap 'rm -f "$keystore"' EXIT
+          test -n "$ANDROID_SIGNING_KEY" || { echo "ANDROID_SIGNING_KEY is required"; exit 1; }
+          test -n "$ANDROID_ALIAS" || { echo "ANDROID_ALIAS is required"; exit 1; }
+          test -n "$ANDROID_KEY_STORE_PASSWORD" || { echo "ANDROID_KEY_STORE_PASSWORD is required"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD is required"; exit 1; }
+          test -n "$ANDROID_CERT_SHA256" || { echo "ANDROID_CERT_SHA256 is required"; exit 1; }
+          printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > "$keystore"
+          keytool -list -keystore "$keystore" -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" >/dev/null
+          expected=$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
+          expected=${expected#SHA256}
+          expected=${expected#SHA-256}
+          [[ "$expected" =~ ^[0-9A-F]{64}$ ]] || { echo "::error::ANDROID_CERT_SHA256 must contain a SHA-256 certificate fingerprint"; exit 1; }
+          actual=$(keytool -exportcert -keystore "$keystore" -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" | sha256sum | awk '{print toupper($1)}')
+          [ "$actual" = "$expected" ] || { echo "::error::ANDROID_CERT_SHA256 does not match the keystore certificate. Set it to: $actual"; exit 1; }
 
       - name: Read project version
         if: env.skip != '1'
@@ -208,25 +247,12 @@ jobs:
           ANDROID_ALIAS: ${{ inputs.release && secrets.ANDROID_ALIAS || '' }}
           ANDROID_KEY_STORE_PASSWORD: ${{ inputs.release && secrets.ANDROID_KEY_STORE_PASSWORD || '' }}
           ANDROID_KEY_PASSWORD: ${{ inputs.release && secrets.ANDROID_KEY_PASSWORD || '' }}
-          ANDROID_CERT_SHA256: ${{ inputs.release && secrets.ANDROID_CERT_SHA256 || '' }}
+          ANDROID_KEY_STORE_FILE: ${{ inputs.release && 'release.jks' || '' }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           if [ '${{ inputs.release }}' = 'true' ]; then
-            test -n "$ANDROID_SIGNING_KEY" || { echo "ANDROID_SIGNING_KEY is required"; exit 1; }
-            test -n "$ANDROID_ALIAS" || { echo "ANDROID_ALIAS is required"; exit 1; }
-            test -n "$ANDROID_KEY_STORE_PASSWORD" || { echo "ANDROID_KEY_STORE_PASSWORD is required"; exit 1; }
-            test -n "$ANDROID_KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD is required"; exit 1; }
-            test -n "$ANDROID_CERT_SHA256" || { echo "ANDROID_CERT_SHA256 is required"; exit 1; }
             printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > ./flutter/android/app/release.jks
-            keytool -list -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" >/dev/null
-            expected=$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')
-            expected=${expected#SHA256}
-            expected=${expected#SHA-256}
-            [[ "$expected" =~ ^[0-9A-F]{64}$ ]] || { echo "::error::ANDROID_CERT_SHA256 must contain a SHA-256 certificate fingerprint"; exit 1; }
-            actual=$(keytool -exportcert -keystore ./flutter/android/app/release.jks -storepass "$ANDROID_KEY_STORE_PASSWORD" -alias "$ANDROID_ALIAS" | sha256sum | awk '{print toupper($1)}')
-            [ "$actual" = "$expected" ] || { echo "::error::ANDROID_CERT_SHA256 does not match the keystore certificate. Set it to: $actual"; exit 1; }
-            printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release.jks\n' "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_ALIAS" > ./flutter/android/key.properties
           fi
           cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ matrix.job.sysroot }}/libc++_shared.so ./flutter/android/app/src/main/jniLibs/${{ matrix.job.abi }}/
           pushd flutter

@@ -1,6 +1,8 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Path
+    [Parameter(Mandatory = $true, ParameterSetName = "Sign")]
+    [string]$Path,
+    [Parameter(Mandatory = $true, ParameterSetName = "Validate")]
+    [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,27 +15,6 @@ if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
 }
 if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_THUMBPRINT)) {
     throw "WINDOWS_CERTIFICATE_THUMBPRINT is required"
-}
-
-$target = (Resolve-Path -LiteralPath $Path).Path
-$files = if ((Get-Item -LiteralPath $target).PSIsContainer) {
-    @(Get-ChildItem -LiteralPath $target -Recurse -File | Where-Object {
-        $_.Extension -in '.exe', '.dll', '.msi' -and
-        ($_.Extension -eq '.exe' -or $_.FullName -notmatch '\\(RustDeskPrinterDriver|usbmmidd_v2)\\')
-    })
-} else {
-    @(Get-Item -LiteralPath $target)
-}
-if ($files.Count -eq 0) {
-    throw "No Windows binaries found in $Path"
-}
-
-$signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
-    Where-Object FullName -Match '\\x64\\signtool\.exe$' |
-    Sort-Object FullName -Descending |
-    Select-Object -First 1
-if (-not $signTool) {
-    throw "signtool.exe was not found"
 }
 
 $pfxPath = Join-Path $env:RUNNER_TEMP "windows-signing.pfx"
@@ -50,6 +31,29 @@ try {
     $actualThumbprint = ($certificate.Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
     if ($expectedThumbprint.Length -ne 40 -or $actualThumbprint -ne $expectedThumbprint) {
         throw "The Windows signing certificate thumbprint does not match WINDOWS_CERTIFICATE_THUMBPRINT"
+    }
+
+    if ($ValidateOnly) { return }
+
+    $target = (Resolve-Path -LiteralPath $Path).Path
+    $files = if ((Get-Item -LiteralPath $target).PSIsContainer) {
+        @(Get-ChildItem -LiteralPath $target -Recurse -File | Where-Object {
+            $_.Extension -in '.exe', '.dll', '.msi' -and
+            ($_.Extension -eq '.exe' -or $_.FullName -notmatch '\\(RustDeskPrinterDriver|usbmmidd_v2)\\')
+        })
+    } else {
+        @(Get-Item -LiteralPath $target)
+    }
+    if ($files.Count -eq 0) {
+        throw "No Windows binaries found in $Path"
+    }
+
+    $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+        Where-Object FullName -Match '\\x64\\signtool\.exe$' |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1
+    if (-not $signTool) {
+        throw "signtool.exe was not found"
     }
 
     foreach ($file in $files) {

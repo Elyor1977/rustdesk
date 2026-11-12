@@ -20,6 +20,17 @@ on:
   pull_request:
     paths:
       - ".github/workflows/windows-x64.yml"
+      - ".github/workflows/bridge.yml"
+      - ".github/patches/**"
+      - ".cargo/**"
+      - "build.rs"
+      - "vcpkg.json"
+      - "res/vcpkg/**"
+      - ".github/workflows/third-party-RustDeskTempTopMostWindow.yml"
+      - ".github/scripts/sign-windows.ps1"
+      - ".github/scripts/*windows7*.py"
+      - ".github/win7-triplets/**"
+      - "res/manifest.xml"
       - "Cargo.lock"
       - "Cargo.toml"
       - "build.py"
@@ -31,6 +42,17 @@ on:
     branches: [master]
     paths:
       - ".github/workflows/windows-x64.yml"
+      - ".github/workflows/bridge.yml"
+      - ".github/patches/**"
+      - ".cargo/**"
+      - "build.rs"
+      - "vcpkg.json"
+      - "res/vcpkg/**"
+      - ".github/workflows/third-party-RustDeskTempTopMostWindow.yml"
+      - ".github/scripts/sign-windows.ps1"
+      - ".github/scripts/*windows7*.py"
+      - ".github/win7-triplets/**"
+      - "res/manifest.xml"
       - "Cargo.lock"
       - "Cargo.toml"
       - "build.py"
@@ -62,6 +84,7 @@ jobs:
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
     with:
+      include-modern: false
       artifact-suffix: -${{ inputs.windows-7 && 'windows7' || 'windows' }}
 
   build-RustDeskTempTopMostWindow:
@@ -92,6 +115,14 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           submodules: recursive
+
+      - name: Validate signing configuration
+        if: inputs.release
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: .\.github\scripts\sign-windows.ps1 -ValidateOnly
 
       - name: Read project version
         id: version
@@ -271,14 +302,15 @@ jobs:
           python3 .github/scripts/check-windows7.py ./rustdesk
           if ($LASTEXITCODE -ne 0) { throw "Windows 7 application compatibility check failed" }
 
-      - name: Validate signing configuration
-        if: inputs.release
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+      - name: Run the Rust tests
+        if: ${{ !inputs.windows-7 }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_THUMBPRINT)) { throw "Windows signing secrets are required" }
+          cargo test --locked --release --lib --features flutter,hwcodec,vram
+          if ($LASTEXITCODE -ne 0) { throw "Windows Rust tests failed" }
+          cargo test --locked --release -p clipboard -p base
+          if ($LASTEXITCODE -ne 0) { throw "Windows clipboard/base tests failed" }
+          cargo test --locked --release -p webrtc-dtls --lib
+          if ($LASTEXITCODE -ne 0) { throw "Windows DTLS tests failed" }
 
       - name: Sign application files
         if: inputs.release

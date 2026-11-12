@@ -1,3 +1,4 @@
+import fnmatch
 import os
 import re
 from pathlib import Path
@@ -22,6 +23,81 @@ def workflow(name):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_legacy_manual_builds_cannot_sign_or_publish(self):
+        for name in ("flutter-nightly", "playground"):
+            config = workflow(name)
+            with self.subTest(workflow=name):
+                self.assertEqual(config["permissions"]["contents"], "read")
+                self.assertNotRegex(str(config), r"secrets\.(?:ANDROID_|WINDOWS_CERTIFICATE|MACOS_|SIGN_)")
+                for job in config["jobs"].values():
+                    self.assertNotIn("secrets", job)
+                    if "uses" in job:
+                        self.assertEqual(job["with"]["publish-release"], "false")
+                    self.assertFalse(any("action-gh-release@" in step.get("uses", "")
+                                         for step in job.get("steps", [])))
+
+    def test_unsigned_android_packages_have_artifact_routes(self):
+        jobs = workflow("flutter-build")["jobs"]
+        for name in ("build-rustdesk-android", "build-rustdesk-android-universal"):
+            with self.subTest(job=name):
+                uploads = [step for step in jobs[name]["steps"]
+                           if step.get("uses", "").startswith("actions/upload-artifact@")
+                           and step["with"].get("path") == "signed-apk/*.apk"]
+                self.assertEqual(len(uploads), 1)
+                self.assertEqual(uploads[0]["if"],
+                                 "env.ANDROID_SIGNING_KEY == '' && env.UPLOAD_ARTIFACT == 'true'")
+                self.assertEqual(uploads[0]["with"]["if-no-files-found"], "error")
+
+    def test_platform_builds_cover_native_build_inputs(self):
+        paths = ("build.rs", ".cargo/config.toml", "vcpkg.json",
+                 "res/vcpkg/mfx-dispatch/portfile.cmake",
+                 ".github/workflows/bridge.yml",
+                 ".github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff")
+        for name in ("windows-x64", "android"):
+            for event in ("push", "pull_request"):
+                patterns = workflow(name)["on"][event]["paths"]
+                for path in paths:
+                    with self.subTest(workflow=name, event=event, path=path):
+                        self.assertTrue(any(fnmatch.fnmatchcase(path, pattern)
+                                            for pattern in patterns))
+
+    def test_windows_tests_and_signer_preflight_precede_signing(self):
+        steps = workflow("windows-x64")["jobs"]["build-windows-x64"]["steps"]
+        names = [step.get("name") for step in steps]
+        tests = next(step for step in steps if step.get("name") == "Run the Rust tests")
+        self.assertIn("!inputs.windows-7", tests["if"])
+        self.assertIn("--lib --features flutter,hwcodec,vram", tests["run"])
+        self.assertIn("-p clipboard -p base", tests["run"])
+        self.assertIn("-p webrtc-dtls", tests["run"])
+        self.assertLess(names.index("Run the Rust tests"), names.index("Sign application files"))
+        self.assertLess(names.index("Validate signing configuration"),
+                        names.index("Install vcpkg dependencies"))
+        preflight = steps[names.index("Validate signing configuration")]
+        self.assertIn("-ValidateOnly", preflight["run"])
+
+    def test_android_signer_preflight_precedes_native_build(self):
+        steps = workflow("android")["jobs"]["build-android"]["steps"]
+        names = [step.get("name") for step in steps]
+        self.assertLess(names.index("Validate Android signing configuration"),
+                        names.index("Install vcpkg dependencies"))
+        build = steps[names.index("Build apk")]
+        self.assertNotIn("key.properties", build["run"])
+        self.assertIn("inputs.release", build["env"]["ANDROID_KEY_STORE_FILE"])
+        gradle = (ROOT / "flutter/android/app/build.gradle").read_text(encoding="utf-8")
+        for name in ("ANDROID_KEY_STORE_FILE", "ANDROID_ALIAS",
+                     "ANDROID_KEY_STORE_PASSWORD", "ANDROID_KEY_PASSWORD"):
+            self.assertIn(f"System.getenv('{name}')", gradle)
+            self.assertIn(name, build["env"])
+
+    def test_single_sdk_callers_only_generate_the_required_bridge(self):
+        bridge = workflow("bridge")
+        self.assertEqual(bridge["on"]["workflow_call"]["inputs"]["include-modern"]["default"], "true")
+        matrix = bridge["jobs"]["generate_bridge"]["strategy"]["matrix"]
+        self.assertIn("inputs.include-modern", matrix["flutter-version"])
+        for name in ("windows-x64", "android", "flutter-ci"):
+            with self.subTest(workflow=name):
+                self.assertEqual(workflow(name)["jobs"]["generate-bridge"]["with"]["include-modern"], "false")
+
     def test_auth_diagnostics_are_throttled_and_metadata_only(self):
         allowed = {"self.inner.id()", "self.authorized",
                    "!lr.password.is_empty()", "result.is_ok()"}
@@ -107,7 +183,7 @@ class WorkflowContractTests(unittest.TestCase):
                                     "write")
         self.assertEqual(workflow("flutter-ci")["permissions"]["contents"], "read")
         self.assertEqual(workflow("flutter-nightly")["permissions"]["contents"],
-                         "write")
+                         "read")
         for event in ("push", "pull_request"):
             self.assertIn(".github/workflows/flutter-build.yml",
                           workflow("flutter-ci")["on"][event]["paths"])

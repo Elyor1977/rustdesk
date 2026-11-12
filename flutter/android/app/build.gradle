@@ -8,6 +8,7 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+def signingStoreFile = System.getenv('ANDROID_KEY_STORE_FILE')
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file('key.properties')
 if (keystorePropertiesFile.exists()) {
@@ -106,20 +107,20 @@ android {
         versionName flutterVersionName
     }
 
-    if (keystorePropertiesFile.exists()) {
+    if (signingStoreFile || keystorePropertiesFile.exists()) {
         signingConfigs {
             release {
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
-                storeFile file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
+                keyAlias (signingStoreFile ? System.getenv('ANDROID_ALIAS') : keystoreProperties['keyAlias'])
+                keyPassword (signingStoreFile ? System.getenv('ANDROID_KEY_PASSWORD') : keystoreProperties['keyPassword'])
+                storeFile file(signingStoreFile ?: keystoreProperties['storeFile'])
+                storePassword (signingStoreFile ? System.getenv('ANDROID_KEY_STORE_PASSWORD') : keystoreProperties['storePassword'])
             }
         }
     }
 
     buildTypes {
         release {
-            if (keystorePropertiesFile.exists()) {
+            if (signingStoreFile || keystorePropertiesFile.exists()) {
                 signingConfig signingConfigs.release
             }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules'

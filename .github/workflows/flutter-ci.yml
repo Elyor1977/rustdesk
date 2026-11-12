@@ -45,6 +45,7 @@ jobs:
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
     with:
+      include-modern: false
       artifact-suffix: -checks-${{ github.run_id }}
 
   flutter-analyze:
