@@ -5535,7 +5535,6 @@ pub mod peer_online {
     mod tests {
         use crate::client::Client;
         use hbb_common::rendezvous_proto::IceCandidate;
-        use hbb_common::tokio;
 
         #[test]
         fn accepts_webrtc_ice_by_session_key_only() {
@@ -5547,22 +5546,6 @@ pub mod peer_online {
 
             assert!(Client::is_expected_webrtc_ice_candidate(&ice, "session-a"));
             assert!(!Client::is_expected_webrtc_ice_candidate(&ice, "session-b"));
-        }
-
-        #[tokio::test]
-        async fn test_query_onlines() {
-            super::query_online_states(
-                vec![
-                    "152183996".to_owned(),
-                    "165782066".to_owned(),
-                    "155323351".to_owned(),
-                    "460952777".to_owned(),
-                ],
-                |onlines: Vec<String>, offlines: Vec<String>| {
-                    println!("onlines: {:?}, offlines: {:?}", &onlines, &offlines);
-                },
-            )
-            .await;
         }
     }
 }

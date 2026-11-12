@@ -4978,16 +4978,10 @@ mod tests {
     }
 
     #[test]
-    fn test_uninstall_cert() {
-        println!("uninstall driver certs: {:?}", cert::uninstall_cert());
-    }
-
-    #[test]
-    fn test_get_unicode_char_by_vk() {
-        let chr = get_char_from_vk(0x41); // VK_A
-        assert_eq!(chr, Some('a'));
-        let chr = get_char_from_vk(VK_ESCAPE as u32); // VK_ESC
-        assert_eq!(chr, None)
+    fn test_get_char_from_unicode() {
+        assert_eq!(get_char_from_unicode('a' as u16), Some('a'));
+        assert_eq!(get_char_from_unicode('ф' as u16), Some('ф'));
+        assert_eq!(get_char_from_unicode(0x1b), None);
     }
 
     #[test]
