@@ -189,6 +189,13 @@ class CustomTouchGestureRecognizer extends ScaleGestureRecognizer {
       DragEndDetails(velocity: d.velocity);
 
   @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    _resetTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   void rejectGesture(int pointer) {
     super.rejectGesture(pointer);
     switch (_currentState) {

@@ -34,4 +34,34 @@ void main() {
 
     expect(oneFingerStarts, 1);
   });
+
+  testWidgets('closing the view cancels a pending pinch-to-pan gesture',
+      (tester) async {
+    var starts = 0;
+    await tester.pumpWidget(RawGestureDetector(
+      behavior: HitTestBehavior.opaque,
+      gestures: <Type, GestureRecognizerFactory>{
+        CustomTouchGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<CustomTouchGestureRecognizer>(
+                CustomTouchGestureRecognizer.new,
+                (recognizer) =>
+                    recognizer..onOneFingerPanStart = (_) => starts++),
+      },
+      child: const SizedBox.expand(),
+    ));
+    final first = await tester.startGesture(const Offset(100, 100), pointer: 1);
+    final second =
+        await tester.startGesture(const Offset(200, 100), pointer: 2);
+    await second.moveBy(const Offset(35, 0));
+    await tester.pump();
+    await second.up();
+    await first.moveBy(const Offset(10, 0));
+    await tester.pump();
+    expect(starts, 0);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 250));
+    await first.up();
+
+    expect(starts, 0);
+  });
 }
