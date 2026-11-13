@@ -50,6 +50,8 @@ pub(crate) mod wayland;
 pub(crate) mod drm_capturer;
 #[cfg(target_os = "linux")]
 pub mod uinput;
+#[cfg(any(target_os = "linux", test))]
+mod uinput_scroll;
 #[cfg(target_os = "linux")]
 pub mod rdp_input;
 #[cfg(target_os = "linux")]

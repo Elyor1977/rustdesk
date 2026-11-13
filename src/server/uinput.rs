@@ -974,14 +974,32 @@ pub mod service {
                 allow_err!(mouse.click_button(&btn))
             }
             DataMouse::ScrollX(length) => {
+                let Some(steps) = crate::server::uinput_scroll::horizontal_scroll_steps(*length)
+                else {
+                    hbb_common::throttled_log!(
+                        std::time::Duration::from_secs(5),
+                        warn,
+                        "Rejected excessive uinput horizontal scroll: {}",
+                        length
+                    );
+                    return;
+                };
                 let scroll = if *length < 0 {
                     mouce::ScrollDirection::Left
                 } else {
                     mouce::ScrollDirection::Right
                 };
 
-                for _ in 0..length.unsigned_abs() {
-                    allow_err!(mouse.scroll_wheel(&scroll))
+                for _ in 0..steps {
+                    if let Err(error) = mouse.scroll_wheel(&scroll) {
+                        hbb_common::throttled_log!(
+                            std::time::Duration::from_secs(5),
+                            warn,
+                            "Uinput horizontal scroll failed: {}",
+                            error
+                        );
+                        break;
+                    }
                 }
             }
             DataMouse::ScrollY(length) => {
